@@ -1,0 +1,13 @@
+# Ignore build files
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.idb
+
+# Ignore VSCode settings
+.vscode/
+
+# Ignore other temporary files
+*.log
+*.tmp
