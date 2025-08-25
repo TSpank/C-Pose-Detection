@@ -109,14 +109,23 @@ int main() {
 
                 kinematics.kinematics_neck(pose_data);
 
-                auto pose_json = Kinematics::structure_json_from_kinematics_history(
+                auto pose_json_angles = Kinematics::structure_json_from_kinematics_history_angles(
                     kinematics.get_kinematic_angles(),
                     true, true, true);
 
-                json json_out(pose_json);
-                // // DEBUG: print JSON being published 
-                std::cout << "Publishing JSON:\n" << json_out.dump(4) << std::endl;
-                auto pubmsg = mqtt::make_message(PUB_TOPIC, json_out.dump());
+                auto pose_json_quats = Kinematics::structure_json_from_kinematics_history_quats(
+                    kinematics.get_kinematic_quaternions());
+
+                json json_out_angles(pose_json_angles);
+                json json_out_quats(pose_json_quats);
+
+                // // DEBUG: print JSON Angles being published 
+                std::cout << "Publishing JSON angles:\n" << json_out_angles.dump(4) << std::endl;
+
+                // // DEBUG: print JSON quats being published 
+                std::cout << "Publishing JSON quats:\n" << json_out_quats.dump(4) << std::endl;
+
+                auto pubmsg = mqtt::make_message(PUB_TOPIC, json_out_angles.dump());
                 pubmsg->set_qos(1);
                 pub_client.publish(pubmsg);
                 std::cout << "Published processed pose to topic: " << PUB_TOPIC << std::endl;

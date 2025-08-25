@@ -7,6 +7,8 @@
 #include <map>
 #include <string>
 #include <utility> 
+#include <nlohmann/json.hpp>
+
 
 class Kinematics {
 private:
@@ -111,17 +113,27 @@ public:
     // --------------------------
     // New function: generate structured JSON-like map
     // --------------------------
-    static std::map<std::string, double> structure_json_from_kinematics_history(
+    static std::map<std::string, double> structure_json_from_kinematics_history_angles(
         const std::vector<std::map<std::string, Eigen::Vector3d>>& kinematic_angles_history,
         bool torso_valid = true,
         bool right_hand = true,
         bool arms = true
     );
 
+    static std::map<std::string, nlohmann::json> structure_json_from_kinematics_history_quats(
+        const std::vector<std::map<std::string, Eigen::Quaterniond>>& kinematic_quaternions_history
+    );
+
     // Getter for private kinematic_angles
     const std::vector<std::map<std::string, Eigen::Vector3d>>& get_kinematic_angles() const {
         return kinematic_angles;
     }
+
+    // Getter for private kinematic_quaternions
+    const std::vector<std::map<std::string, Eigen::Quaterniond>>& get_kinematic_quaternions() const {
+        return kinematic_quaternions;
+    }
+
 };
 
 #endif

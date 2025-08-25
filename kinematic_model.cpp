@@ -689,6 +689,9 @@ void Kinematics::kinematics_neck(
     double right_hand_rotation = hand_rolls.second;
     auto [right_arm_angles, right_arm_quats] = right_arm_orientation(pose_data,torso_quat,right_hand_rotation);
 
+    //Correct Angle Direction
+    
+
     // Append to history
     // Merge torso and head maps
     std::map<std::string, Eigen::Vector3d> merged_angles = torso_angles;
@@ -715,7 +718,7 @@ void Kinematics::kinematics_neck(
     }
 }
 
-std::map<std::string, double> Kinematics::structure_json_from_kinematics_history(
+std::map<std::string, double> Kinematics::structure_json_from_kinematics_history_angles(
     const std::vector<std::map<std::string, Eigen::Vector3d>>& kinematic_angles_history,
     bool torso_valid,
     bool right_hand,
@@ -799,6 +802,44 @@ std::map<std::string, double> Kinematics::structure_json_from_kinematics_history
 
     return pose;
 }
+
+std::map<std::string, nlohmann::json> Kinematics::structure_json_from_kinematics_history_quats(
+    const std::vector<std::map<std::string, Eigen::Quaterniond>>& kinematic_quaternions_history) {
+
+    if (kinematic_quaternions_history.empty()) return {};
+
+    const auto& kinematic_quaternions_last = kinematic_quaternions_history.back();
+
+    std::map<std::string, nlohmann::json> pose;
+
+    // Helper lambda to convert Eigen::Quaterniond to JSON
+    auto quat_to_json = [](const Eigen::Quaterniond& quat) -> nlohmann::json {
+        return nlohmann::json{{"w", quat.w()}, {"x", quat.x()}, {"y", quat.y()}, {"z", quat.z()}};
+    };
+
+    // Extract quaternion data for each body part
+    if (kinematic_quaternions_last.count("torso")) {
+        pose["torso_quat"] = quat_to_json(kinematic_quaternions_last.at("torso"));
+    }
+    if (kinematic_quaternions_last.count("head")) {
+        pose["head_quat"] = quat_to_json(kinematic_quaternions_last.at("head"));
+    }
+    if (kinematic_quaternions_last.count("l_arm_upper")) {
+        pose["l_arm_upper_quat"] = quat_to_json(kinematic_quaternions_last.at("l_arm_upper"));
+    }
+    if (kinematic_quaternions_last.count("r_arm_upper")) {
+        pose["r_arm_upper_quat"] = quat_to_json(kinematic_quaternions_last.at("r_arm_upper"));
+    }
+    if (kinematic_quaternions_last.count("l_arm_lower")) {
+        pose["l_arm_lower_quat"] = quat_to_json(kinematic_quaternions_last.at("l_arm_lower"));
+    }
+    if (kinematic_quaternions_last.count("r_arm_lower")) {
+        pose["r_arm_lower_quat"] = quat_to_json(kinematic_quaternions_last.at("r_arm_lower"));
+    }
+
+    return pose;
+}
+
 
 
 // ========================
