@@ -66,6 +66,30 @@ double Kinematics::arm_rotation_angle(const Eigen::Vector3d& arm_vec,
         return sign * angle;
     }
 
+std::pair<double, double> Kinematics::vector_to_pitch_yaw(
+        const Eigen::Vector3d& arm_vec,
+        const Eigen::Matrix3d& torso_matrix)
+    {
+        // Extract torso axes
+        Eigen::Vector3d torso_x = torso_matrix.col(0);
+        Eigen::Vector3d torso_y = torso_matrix.col(1);
+        Eigen::Vector3d torso_z = torso_matrix.col(2);
+
+        // --- yaw: projection in torso XY-plane (remove z component) ---
+        Eigen::Vector3d arm_proj_xy = arm_vec - (arm_vec.dot(torso_z)) * torso_z;
+        arm_proj_xy.normalize();
+
+        double yaw = std::atan2(
+            torso_z.dot(torso_x.cross(arm_proj_xy)),
+            torso_x.dot(arm_proj_xy)
+        );
+
+        // --- pitch: elevation out of torso plane ---
+        double pitch = std::asin(arm_vec.dot(torso_z));
+
+        return {yaw, pitch};
+    }
+
 Eigen::Matrix3d Kinematics::build_hand_reference_frame(
     const Eigen::Vector3d& forearm_vec,
     const Eigen::Vector3d& shoulder_vec
@@ -319,8 +343,8 @@ Kinematics::left_arm_orientation(
     }
 
     std::vector<std::string> upper_keys = {"l_shoulder", "l_elbow"};
-    std::vector<std::string> lower_keys = {"l_elbow", "l_wrist"};
-    std::vector<std::string> hip_keys   = {"l_hip", "r_hip"};
+    std::vector<std::string> lower_keys = {"l_elbow", "l_wrist","lock to"};
+    std::vector<std::string> hip_keys   = {"l_hip", "r_hip","lock2D"};
 
     auto has_keys = [&](const std::vector<std::string>& keys){
         return std::all_of(keys.begin(), keys.end(),
@@ -343,8 +367,9 @@ Kinematics::left_arm_orientation(
         Eigen::Vector3d l_elbow = body_pts.at("l_elbow");
         Eigen::Vector3d arm_vec = normalize(l_elbow - l_shoulder);
 
-        double pitch = arm_rotation_angle(arm_vec, torso_x, torso_z) - M_PI/2.0;
-        double yaw   = arm_rotation_angle(arm_vec, torso_y, torso_z);
+        std::pair<double, double> lu_angles = Kinematics::vector_to_pitch_yaw(arm_vec, torso_matrix);
+        double pitch = lu_angles.first - M_PI/2.0;
+        double yaw   = lu_angles.second;
         double roll  = 0.0;
 
         Eigen::Quaterniond l_arm_upper_rel =
@@ -370,9 +395,10 @@ Kinematics::left_arm_orientation(
         Eigen::Vector3d l_wrist = body_pts.at("l_wrist");
         Eigen::Vector3d forearm_vec = normalize(l_wrist - l_elbow);
 
-        double pitch = arm_rotation_angle(forearm_vec, torso_x, torso_z) - M_PI/2.0;
-        double yaw   = arm_rotation_angle(forearm_vec, torso_y, torso_z);
-        double roll  = 0.0; // could add left_hand_roll if needed
+        std::pair<double, double> ll_angles = Kinematics::vector_to_pitch_yaw(forearm_vec, torso_matrix);
+        double pitch = ll_angles.first - M_PI/2.0;
+        double yaw   = ll_angles.second;
+        double roll  = left_hand_roll - M_PI/2.0; // could add left_hand_roll if needed
 
         Eigen::Quaterniond l_arm_lower_rel =
             Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
@@ -427,7 +453,7 @@ Kinematics::right_arm_orientation(
 
     std::vector<std::string> upper_keys = {"r_shoulder", "r_elbow"};
     std::vector<std::string> lower_keys = {"r_elbow", "r_wrist"};
-    std::vector<std::string> hip_keys   = {"l_hip", "r_hip"};
+    std::vector<std::string> hip_keys   = {"l_hip", "r_hip", "lock2D"};
 
     auto has_keys = [&](const std::vector<std::string>& keys){
         return std::all_of(keys.begin(), keys.end(),
@@ -450,8 +476,9 @@ Kinematics::right_arm_orientation(
         Eigen::Vector3d r_elbow = body_pts.at("r_elbow");
         Eigen::Vector3d arm_vec = normalize(r_elbow - r_shoulder);
 
-        double pitch = arm_rotation_angle(arm_vec, torso_x, torso_z) - M_PI/2.0;
-        double yaw   = arm_rotation_angle(arm_vec, torso_y, torso_z);
+        std::pair<double, double> ru_angles = Kinematics::vector_to_pitch_yaw(arm_vec, torso_matrix);
+        double pitch = -ru_angles.first - 3*(M_PI/2.0);
+        double yaw   = ru_angles.second;
         double roll  = 0.0;
 
         Eigen::Quaterniond r_arm_upper_rel =
@@ -477,9 +504,10 @@ Kinematics::right_arm_orientation(
         Eigen::Vector3d r_wrist = body_pts.at("r_wrist");
         Eigen::Vector3d forearm_vec = normalize(r_wrist - r_elbow);
 
-        double pitch = arm_rotation_angle(forearm_vec, torso_x, torso_z) - M_PI/2.0;
-        double yaw   = arm_rotation_angle(forearm_vec, torso_y, torso_z);
-        double roll  = 0.0; // could add right_hand_roll if needed
+        std::pair<double, double> ru_angles = Kinematics::vector_to_pitch_yaw(forearm_vec, torso_matrix);
+        double pitch = -ru_angles.first - 3*(M_PI/2.0);
+        double yaw   = ru_angles.first;
+        double roll  = right_hand_roll + M_PI/2.0; // could add right_hand_roll if needed
 
         Eigen::Quaterniond r_arm_lower_rel =
             Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *

@@ -37,6 +37,11 @@ private:
         const Eigen::Vector3d& shoulder_vec
     );
 
+    static std::pair<double, double> vector_to_pitch_yaw(
+        const Eigen::Vector3d& arm_vec,
+        const Eigen::Matrix3d& torso_matrix
+    );
+
     double prev_left_angle;
     double prev_right_angle;
     bool prev_left_angle_initialized;
