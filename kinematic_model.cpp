@@ -7,9 +7,27 @@
 #include <vector>
 #include <algorithm>
 
+#include <Eigen/Geometry>     // For Eigen::Quaterniond
+#include <cmath>              // For std::abs, std::atan2, M_PI, std::round
+#include <stdexcept>          // For std::invalid_argument
+
+#include <utility> // for std::pair
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+// ========================
+// Constructor
+// ========================
+Kinematics::Kinematics()
+    : prev_left_angle(0.0),
+      prev_right_angle(0.0),
+      prev_left_angle_initialized(false),
+      prev_right_angle_initialized(false)
+{
+    // Constructor body can be empty if no other initialization needed
+}
 
 // ========================
 // Private helper
@@ -47,6 +65,36 @@ double Kinematics::arm_rotation_angle(const Eigen::Vector3d& arm_vec,
 
         return sign * angle;
     }
+
+Eigen::Matrix3d Kinematics::build_hand_reference_frame(
+    const Eigen::Vector3d& forearm_vec,
+    const Eigen::Vector3d& shoulder_vec
+) {
+    auto normalize = [](const Eigen::Vector3d& v) -> Eigen::Vector3d {
+        return v.normalized();
+    };
+
+    // Z-axis aligned with forearm
+    Eigen::Vector3d z_axis = normalize(forearm_vec);
+
+    // Y-axis: cross of z_axis and shoulder vector (palm normal)
+    Eigen::Vector3d y_axis = normalize(z_axis.cross(shoulder_vec));
+
+    // Adjust Y to match Python version: [0, y, |z|]
+    y_axis = Eigen::Vector3d(0.0, y_axis.y(), std::abs(y_axis.z()));
+    y_axis.normalize(); // normalize after modification
+
+    // X-axis: re-orthogonalize
+    Eigen::Vector3d x_axis = normalize(y_axis.cross(z_axis));
+
+    // Construct 3x3 rotation matrix: columns = [x, y, z]
+    Eigen::Matrix3d hand_frame;
+    hand_frame.col(0) = x_axis;
+    hand_frame.col(1) = y_axis;
+    hand_frame.col(2) = z_axis;
+
+    return hand_frame;
+}
 
 // ========================
 // Torso orientation
@@ -270,13 +318,6 @@ Kinematics::left_arm_orientation(
         }
     }
 
-    for (const auto& [key, vec] : body_pts) {
-    std::cout << key << ": [" 
-              << vec.x() << ", " 
-              << vec.y() << ", " 
-              << vec.z() << "]\n";
-    }
-
     std::vector<std::string> upper_keys = {"l_shoulder", "l_elbow"};
     std::vector<std::string> lower_keys = {"l_elbow", "l_wrist"};
     std::vector<std::string> hip_keys   = {"l_hip", "r_hip"};
@@ -298,7 +339,6 @@ Kinematics::left_arm_orientation(
 
     // Upper arm
     if (has_keys(upper_keys)) {
-        std::cout << "All upper keys found" << std::endl;
         Eigen::Vector3d l_shoulder = body_pts.at("l_shoulder");
         Eigen::Vector3d l_elbow = body_pts.at("l_elbow");
         Eigen::Vector3d arm_vec = normalize(l_elbow - l_shoulder);
@@ -326,7 +366,6 @@ Kinematics::left_arm_orientation(
 
     // Lower arm
     if (has_keys(lower_keys)) {
-        std::cout << "All lower keys found" << std::endl;
         Eigen::Vector3d l_elbow = body_pts.at("l_elbow");
         Eigen::Vector3d l_wrist = body_pts.at("l_wrist");
         Eigen::Vector3d forearm_vec = normalize(l_wrist - l_elbow);
@@ -468,6 +507,169 @@ Kinematics::right_arm_orientation(
 }
 
 // ========================
+// Hand Orientation
+// ========================
+double Kinematics::compute_hand_roll(
+    const Eigen::Vector3d& index_base,
+    const Eigen::Vector3d& wrist,
+    const Eigen::Vector3d& pinky_base,
+    const Eigen::Vector3d& shoulder_vec,
+    const Eigen::Matrix3d* rest_orientation,
+    bool right
+) {
+    // Validate points
+    if ((index_base - wrist).norm() < 1e-8)
+        throw std::invalid_argument("index_base and wrist cannot be the same point");
+    if ((pinky_base - index_base).norm() < 1e-8)
+        throw std::invalid_argument("pinky_base and index_base cannot be the same point");
+
+    // Local hand frame
+    Eigen::Vector3d z_axis = normalize(index_base - wrist);
+    Eigen::Vector3d x_axis = normalize(pinky_base - index_base);
+
+    if (std::abs(z_axis.dot(x_axis)) > 0.99) return 0.0;
+
+    Eigen::Vector3d y_axis;
+    if (!right) {
+        y_axis = normalize(x_axis.cross(z_axis));
+    } else {
+        y_axis = normalize(z_axis.cross(x_axis));
+    }
+    x_axis = normalize(y_axis.cross(z_axis));
+
+    Eigen::Matrix3d R_now;
+    R_now.col(0) = x_axis;
+    R_now.col(1) = y_axis;
+    R_now.col(2) = z_axis;
+
+    Eigen::Matrix3d R_ref = rest_orientation ? *rest_orientation : build_hand_reference_frame(z_axis, shoulder_vec);
+
+    Eigen::Quaterniond r_now(R_now);
+    Eigen::Quaterniond r_ref(R_ref);
+    Eigen::Quaterniond r_rel = r_now * r_ref.inverse();
+
+    Eigen::Vector3d quat_vec(r_rel.x(), r_rel.y(), r_rel.z());
+    double quat_w = r_rel.w();
+
+    double angle = 2.0 * std::atan2(quat_vec.dot(z_axis), quat_w);
+
+    // Unwrap angle for continuity
+    if (!right) {
+        if (prev_left_angle_initialized)
+            angle += 2 * M_PI * std::round((prev_left_angle - angle) / (2 * M_PI));
+        prev_left_angle = angle;
+        prev_left_angle_initialized = true;
+    } else {
+        if (prev_right_angle_initialized)
+            angle += 2 * M_PI * std::round((prev_right_angle - angle) / (2 * M_PI));
+        prev_right_angle = angle;
+        prev_right_angle_initialized = true;
+    }
+
+    return angle;
+}
+
+std::pair<double, double> Kinematics::get_hand_orientation(
+    const std::map<std::string, Eigen::Vector3d>& pose_data
+) {
+    double left_hand_roll = 0.0;
+    double right_hand_roll = 0.0;
+
+    // Extract body_pts/*
+    std::map<std::string, Eigen::Vector3d> body_pts;
+    for (const auto& [key, vec] : pose_data) {
+        const std::string prefix = "body_pts/";
+        if (key.rfind(prefix, 0) == 0) {
+            std::string subkey = key.substr(prefix.size());
+            body_pts[subkey] = vec;
+        }
+    }
+
+    // std::cout << "Body_pts" << std::endl;
+    // for (const auto& [key, vec] : body_pts) {
+    // std::cout << key << ": [" 
+    //           << vec.x() << ", " 
+    //           << vec.y() << ", " 
+    //           << vec.z() << "]\n";
+    // }
+
+
+    // Extract hand_pts/right/*
+    std::map<std::string, Eigen::Vector3d> right_hand_pts;
+    const std::string right_prefix = "hand_pts/right/";
+    for (const auto& [key, vec] : pose_data) {
+        if (key.rfind(right_prefix, 0) == 0) {
+            std::string subkey = key.substr(right_prefix.size());
+            right_hand_pts[subkey] = vec;
+        }
+    }
+
+    // std::cout << "Right Hand_pts" << std::endl;
+    // for (const auto& [key, vec] : right_hand_pts) {
+    // std::cout << key << ": [" 
+    //           << vec.x() << ", " 
+    //           << vec.y() << ", " 
+    //           << vec.z() << "]\n";
+    // }
+
+
+    // Extract hand_pts/left/*
+    std::map<std::string, Eigen::Vector3d> left_hand_pts;
+    const std::string left_prefix = "hand_pts/left/";
+    for (const auto& [key, vec] : pose_data) {
+        if (key.rfind(left_prefix, 0) == 0) {
+            std::string subkey = key.substr(left_prefix.size());
+            left_hand_pts[subkey] = vec;
+        }
+    }
+
+    // Check required body keys
+    std::vector<std::string> required_body_keys = {"l_shoulder", "r_shoulder"};
+    bool body_ok = std::all_of(required_body_keys.begin(), required_body_keys.end(),
+                                [&](const std::string& k){ return body_pts.find(k) != body_pts.end(); });
+
+    if (!body_ok) return {left_hand_roll, right_hand_roll};
+
+    Eigen::Vector3d l_shoulder = body_pts.at("l_shoulder");
+    Eigen::Vector3d r_shoulder = body_pts.at("r_shoulder");
+    Eigen::Vector3d shoulder_vec = normalize(r_shoulder - l_shoulder);
+
+    // Required hand keys
+    std::vector<std::string> hand_keys = {"index_base", "pinky_base", "wrist", "ring_base"};
+
+    // Right hand
+    bool right_ok = std::all_of(hand_keys.begin(), hand_keys.end(),
+                                [&](const std::string& k){ return right_hand_pts.find(k) != right_hand_pts.end(); });
+    if (right_ok) {
+        right_hand_roll = compute_hand_roll(
+            right_hand_pts.at("index_base"),
+            right_hand_pts.at("wrist"),
+            right_hand_pts.at("pinky_base"),
+            shoulder_vec,
+            nullptr,
+            true
+        );
+    }
+
+    // Left hand
+    bool left_ok = std::all_of(hand_keys.begin(), hand_keys.end(),
+                               [&](const std::string& k){ return left_hand_pts.find(k) != left_hand_pts.end(); });
+    if (left_ok) {
+        left_hand_roll = compute_hand_roll(
+            left_hand_pts.at("index_base"),
+            left_hand_pts.at("wrist"),
+            left_hand_pts.at("pinky_base"),
+            shoulder_vec,
+            nullptr,
+            false
+        );
+    }
+
+    return {left_hand_roll, right_hand_roll};
+}
+
+
+// ========================
 // Neck kinematics
 // ========================
 void Kinematics::kinematics_neck(
@@ -479,19 +681,25 @@ void Kinematics::kinematics_neck(
     Eigen::Quaterniond torso_quat = torso_quats.at("torso");
     auto [head_angles, head_quats] = head_orientation(pose_data,torso_quat);
 
-    double left_hand_rotation = 0.0;
+    std::pair<double, double> hand_rolls = get_hand_orientation(pose_data);
+
+    double left_hand_rotation = hand_rolls.first;
     auto [left_arm_angles, left_arm_quats] = left_arm_orientation(pose_data,torso_quat,left_hand_rotation);
+
+    double right_hand_rotation = hand_rolls.second;
+    auto [right_arm_angles, right_arm_quats] = right_arm_orientation(pose_data,torso_quat,right_hand_rotation);
 
     // Append to history
     // Merge torso and head maps
     std::map<std::string, Eigen::Vector3d> merged_angles = torso_angles;
     merged_angles.insert(head_angles.begin(), head_angles.end());
     merged_angles.insert(left_arm_angles.begin(), left_arm_angles.end());
+    merged_angles.insert(right_arm_angles.begin(), right_arm_angles.end());
     
-
     std::map<std::string, Eigen::Quaterniond> merged_quats = torso_quats;
     merged_quats.insert(head_quats.begin(), head_quats.end());
     merged_quats.insert(left_arm_quats.begin(), left_arm_quats.end());
+    merged_quats.insert(right_arm_quats.begin(), right_arm_quats.end());
 
     // Append merged maps to history
     kinematic_angles.push_back(merged_angles);
@@ -505,9 +713,6 @@ void Kinematics::kinematics_neck(
                 << kv.second.y() << ", "
                 << kv.second.z() << "]" << std::endl;
     }
-
-    
-
 }
 
 std::map<std::string, double> Kinematics::structure_json_from_kinematics_history(

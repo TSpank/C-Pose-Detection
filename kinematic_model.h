@@ -6,6 +6,7 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <utility> 
 
 class Kinematics {
 private:
@@ -28,9 +29,19 @@ private:
         const Eigen::Vector3d& reference
     );
 
+    //builds hand refernce fram in order to calculate hand orientation
+    static Eigen::Matrix3d build_hand_reference_frame(
+        const Eigen::Vector3d& forearm_vec,
+        const Eigen::Vector3d& shoulder_vec
+    );
+
+    double prev_left_angle;
+    double prev_right_angle;
+    bool prev_left_angle_initialized;
+    bool prev_right_angle_initialized;
 
 public:
-    Kinematics() = default;
+    Kinematics();
 
     // Compute torso orientation; returns two maps: angles and quaternions
     std::pair<
@@ -65,13 +76,32 @@ public:
     // Compute head & shoulder kinematics and update internal storage
     void kinematics_neck(const std::map<std::string, Eigen::Vector3d>& pose_data);
 
-    // Compute head orientation relative to torso
+    // ========================
+    // Head orientation
+    // ========================
     std::pair<
         std::map<std::string, Eigen::Vector3d>,
         std::map<std::string, Eigen::Quaterniond>
     > head_orientation(
         const std::map<std::string, Eigen::Vector3d>& pose_data,
         const Eigen::Quaterniond& torso_quat
+    );
+
+    // ========================
+    // Hand Roll
+    // ========================
+    double compute_hand_roll(
+        const Eigen::Vector3d& index_base,
+        const Eigen::Vector3d& wrist,
+        const Eigen::Vector3d& pinky_base,
+        const Eigen::Vector3d& shoulder_vec,
+        const Eigen::Matrix3d* rest_orientation = nullptr,
+        bool right = true
+    );
+
+    // Get left and right hand orientation
+    std::pair<double, double> get_hand_orientation(
+        const std::map<std::string, Eigen::Vector3d>& pose_data
     );
 
     // Optional getters for latest stored values
