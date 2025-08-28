@@ -6,6 +6,34 @@
 #include <nlohmann/json.hpp>
 #include "kinematic_model.h"
 
+using json = nlohmann::json;
+
+json structure_pose_payload(const json& pose_json_angles, bool include_camera = false) {
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()
+    ).count();
+
+    json pose_data = pose_json_angles;
+    pose_data["timestamp"] = ms;
+
+    json payload;
+    payload["pose"] = pose_data;
+
+    if (include_camera) {
+        json camera_data = {
+            {"position", {{"x", -1.0}, {"y", 1.6}, {"z", 0.0}}},
+            {"target",   {{"x",  0.0}, {"y", 1.6}, {"z", 0.0}}},
+            {"mimic", false},
+            {"cam_animation", false}
+        };
+        payload["camera"] = camera_data;
+    }
+
+    return payload;
+}
+
+
 // Fix static linking issue
 namespace mqtt {
     const std::string message::EMPTY_STR;
@@ -20,7 +48,7 @@ const std::string PUB_SERVER_ADDRESS("tcp://207.154.244.181");
 const std::string PUB_CLIENT_ID("publisher_client");
 const std::string PUB_TOPIC("mojo/iOS/1234");
 
-using json = nlohmann::json;
+
 
 // Recursive helper to traverse JSON and extract 3-element numeric arrays
 void extract_pose_data(
@@ -91,7 +119,7 @@ int main() {
 
     // Main loop: receive -> compute -> publish
     auto start = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
+    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(100)) {
         mqtt::const_message_ptr msg(nullptr);
         if (sub_client.try_consume_message_for(&msg, std::chrono::milliseconds(100)) && msg) {
             try {
@@ -117,15 +145,16 @@ int main() {
                     kinematics.get_kinematic_quaternions());
 
                 json json_out_angles(pose_json_angles);
+                json payload_angles = structure_pose_payload(json_out_angles, false);
                 json json_out_quats(pose_json_quats);
 
-                // // DEBUG: print JSON Angles being published 
-                std::cout << "Publishing JSON angles:\n" << json_out_angles.dump(4) << std::endl;
+                // // // DEBUG: print JSON Angles being published 
+                // std::cout << "Publishing JSON angles:\n" << json_out_angles.dump(4) << std::endl;
 
-                // // DEBUG: print JSON quats being published 
-                std::cout << "Publishing JSON quats:\n" << json_out_quats.dump(4) << std::endl;
+                // // // DEBUG: print JSON quats being published 
+                // std::cout << "Publishing JSON quats:\n" << json_out_quats.dump(4) << std::endl;
 
-                auto pubmsg = mqtt::make_message(PUB_TOPIC, json_out_angles.dump());
+                auto pubmsg = mqtt::make_message(PUB_TOPIC, payload_angles.dump());
                 pubmsg->set_qos(1);
                 pub_client.publish(pubmsg);
                 std::cout << "Published processed pose to topic: " << PUB_TOPIC << std::endl;

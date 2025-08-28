@@ -120,6 +120,23 @@ Eigen::Matrix3d Kinematics::build_hand_reference_frame(
     return hand_frame;
 }
 
+Eigen::Vector3d canonicalEuler(const Eigen::Quaterniond& q) {
+    // Create a new quaternion instead of modifying the const input
+    Eigen::Quaterniond quat = q;
+
+    // Flip quaternion to consistent branch
+    if (quat.w() < 0) quat = Eigen::Quaterniond(-quat.w(), -quat.x(), -quat.y(), -quat.z());
+
+    // Compute angles using atan2 / asin manually
+    double roll  = atan2(2*(quat.w()*quat.x() + quat.y()*quat.z()), 1 - 2*(quat.x()*quat.x() + quat.y()*quat.y()));
+    double pitch = asin( std::clamp(2*(quat.w()*quat.y() - quat.z()*quat.x()), -1.0, 1.0) );
+    double yaw   = atan2(2*(quat.w()*quat.z() + quat.x()*quat.y()), 1 - 2*(quat.y()*quat.y() + quat.z()*quat.z()));
+
+    // Wrap angles to [-pi, pi] if needed
+    Eigen::Vector3d euler(yaw, pitch, roll); // adjust order to match ZYX
+
+    return euler;
+}
 // ========================
 // Torso orientation
 // ========================
@@ -142,7 +159,8 @@ std::pair<
     std::map<std::string, Eigen::Vector3d> angle_map;
     std::map<std::string, Eigen::Quaterniond> quat_map;
 
-    std::vector<std::string> keys1 = {"l_shoulder","r_shoulder","l_hip","r_hip"};
+    
+    std::vector<std::string> keys1 = {"l_shoulder","r_shoulder","l_hip","r_hip", "No3D"};
     std::vector<std::string> keys2 = {"l_shoulder","r_shoulder"};
 
     bool has_keys1 = true;
@@ -178,8 +196,8 @@ std::pair<
         rot_matrix.col(2) = z_axis;
 
         Eigen::Quaterniond quat(rot_matrix);
-        Eigen::Vector3d euler = rot_matrix.eulerAngles(2,1,0); // ZYX order
-
+        Eigen::Vector3d euler = canonicalEuler(quat);
+        
         angle_map["torso"] = euler;
         quat_map["torso"]  = quat;
     }
@@ -190,7 +208,7 @@ std::pair<
 
         Eigen::Vector3d x_axis = normalize(l_shoulder - r_shoulder);
         Eigen::Vector3d z_axis = normalize(x_axis.cross(ref));
-        if (z_axis.dot(ref) < 0) z_axis = -z_axis;
+        if (z_axis.dot(ref) > 0) z_axis = -z_axis;
         Eigen::Vector3d y_axis = normalize(z_axis.cross(x_axis));
 
         Eigen::Matrix3d rot_matrix;
@@ -199,7 +217,7 @@ std::pair<
         rot_matrix.col(2) = z_axis;
 
         Eigen::Quaterniond quat(rot_matrix);
-        Eigen::Vector3d euler = rot_matrix.eulerAngles(2,1,0); // ZYX order
+        Eigen::Vector3d euler = canonicalEuler(quat);
 
         angle_map["torso"] = euler;
         quat_map["torso"]  = quat;
@@ -297,7 +315,7 @@ Kinematics::head_orientation(
     Eigen::Quaterniond q_rel = quat * torso_quat.inverse();
 
     head_quat = q_rel;
-    head_euler = q_rel.toRotationMatrix().eulerAngles(2,1,0); // ZYX order
+    head_euler = canonicalEuler(head_quat);
 
     head_euler_map["head"] = head_euler;
     head_quat_map["head"] = head_quat;
@@ -737,13 +755,15 @@ void Kinematics::kinematics_neck(
     kinematic_quaternions.push_back(merged_quats);
 
     // Print merged_angles
-    std::cout << "Merged Angles: " << std::endl;
+    std::cout << "Merged Angles (degrees): " << std::endl;
     for (const auto& kv : merged_angles) {
+        Eigen::Vector3d euler_deg = kv.second * (180.0 / M_PI);
         std::cout << "  " << kv.first << " : ["
-                << kv.second.x() << ", "
-                << kv.second.y() << ", "
-                << kv.second.z() << "]" << std::endl;
+                << euler_deg.x() << ", "
+                << euler_deg.y() << ", "
+                << euler_deg.z() << "]" << std::endl;
     }
+
 }
 
 std::map<std::string, double> Kinematics::structure_json_from_kinematics_history_angles(

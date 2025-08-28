@@ -4,7 +4,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <vector>
-#include <map>
+#include <map>                                                                                        
 #include <string>
 #include <utility> 
 #include <nlohmann/json.hpp>
@@ -41,6 +41,8 @@ private:
         const Eigen::Vector3d& arm_vec,
         const Eigen::Matrix3d& torso_matrix
     );
+
+    static Eigen::Vector3d toEulerRadians(const Eigen::Matrix3d& rot_matrix);
 
     double prev_left_angle;
     double prev_right_angle;
