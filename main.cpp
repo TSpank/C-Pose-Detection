@@ -48,9 +48,6 @@ const std::string PUB_SERVER_ADDRESS("tcp://207.154.244.181");
 const std::string PUB_CLIENT_ID("publisher_client");
 const std::string PUB_TOPIC("mojo/iOS/1234");
 
-
-
-// Recursive helper to traverse JSON and extract 3-element numeric arrays
 void extract_pose_data(
     const json& j,
     const std::string& path,
@@ -60,8 +57,19 @@ void extract_pose_data(
         for (auto& [key, val] : j.items()) {
             std::string new_path = path.empty() ? key : path + "/" + key;
 
-            if (val.is_array() && val.size() == 3
-                && val[0].is_number() && val[1].is_number() && val[2].is_number())
+            // New case: object with "x", "y", "z" keys
+            if (val.is_object() && val.contains("x") && val.contains("y") && val.contains("z") &&
+                val["x"].is_number() && val["y"].is_number() && val["z"].is_number())
+            {
+                pose_data[new_path] = Eigen::Vector3d(
+                    val["x"].get<double>(),
+                    val["y"].get<double>(),
+                    val["z"].get<double>()
+                );
+            }
+            // Old case: array of size 3
+            else if (val.is_array() && val.size() == 3 &&
+                     val[0].is_number() && val[1].is_number() && val[2].is_number())
             {
                 pose_data[new_path] = Eigen::Vector3d(
                     val[0].get<double>(),
@@ -81,6 +89,7 @@ void extract_pose_data(
         }
     }
 }
+
 
 int main() {
     Kinematics kinematics;
@@ -127,13 +136,6 @@ int main() {
                 json json_msg = json::parse(msg->to_string());
 
                 extract_pose_data(json_msg, "", pose_data);
-
-                // for (const auto& [key, vec] : pose_data) {
-                //     std::cout << key << ": ("
-                //               << vec.x() << ", "
-                //               << vec.y() << ", "
-                //               << vec.z() << ")\n";
-                // }
 
                 kinematics.kinematics_neck(pose_data);
 

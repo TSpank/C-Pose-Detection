@@ -148,8 +148,8 @@ std::pair<
 {
     std::map<std::string, Eigen::Vector3d> body_pts;
         for (auto& [key, vec] : pose_data) {
-        if (key.rfind("body_pts/", 0) == 0) { // starts with "body_pts/"
-            std::string subkey = key.substr(std::string("body_pts/").size());
+        if (key.rfind("poses/", 0) == 0) { // starts with "body_pts/"
+            std::string subkey = key.substr(std::string("poses/").size());
             body_pts[subkey] = vec;
         }
     }
@@ -160,8 +160,8 @@ std::pair<
     std::map<std::string, Eigen::Quaterniond> quat_map;
 
     
-    std::vector<std::string> keys1 = {"l_shoulder","r_shoulder","l_hip","r_hip", "No3D"};
-    std::vector<std::string> keys2 = {"l_shoulder","r_shoulder"};
+    std::vector<std::string> keys1 = {"LeftShoulder","RightShoulder","LeftHip","RightHip", "No3D"};
+    std::vector<std::string> keys2 = {"LeftShoulder","RightShoulder"};
 
     bool has_keys1 = true;
     for (auto& k : keys1) {
@@ -180,10 +180,10 @@ std::pair<
     }
 
     if (has_keys1) {
-        Eigen::Vector3d l_shoulder = body_pts.at("l_shoulder");
-        Eigen::Vector3d r_shoulder = body_pts.at("r_shoulder");
-        Eigen::Vector3d l_hip = body_pts.at("l_hip");
-        Eigen::Vector3d r_hip = body_pts.at("r_hip");
+        Eigen::Vector3d l_shoulder = body_pts.at("LeftShoulder");
+        Eigen::Vector3d r_shoulder = body_pts.at("RightShoulder");
+        Eigen::Vector3d l_hip = body_pts.at("LeftHip");
+        Eigen::Vector3d r_hip = body_pts.at("RightHip");
 
         Eigen::Vector3d y_axis = normalize((l_hip + r_hip)/2 - (l_shoulder + r_shoulder)/2);
         Eigen::Vector3d x_axis = normalize(l_shoulder - r_shoulder);
@@ -202,8 +202,8 @@ std::pair<
         quat_map["torso"]  = quat;
     }
     else if (has_keys2) {
-        Eigen::Vector3d l_shoulder = body_pts.at("l_shoulder");
-        Eigen::Vector3d r_shoulder = body_pts.at("r_shoulder");
+        Eigen::Vector3d l_shoulder = body_pts.at("LeftShoulder");
+        Eigen::Vector3d r_shoulder = body_pts.at("RightShoulder");
         Eigen::Vector3d ref(0,1,0);
 
         Eigen::Vector3d x_axis = normalize(l_shoulder - r_shoulder);
@@ -251,8 +251,8 @@ Kinematics::head_orientation(
     // Extract face mesh points
     std::map<std::string, Eigen::Vector3d> face_mesh_pts;
     for (const auto& [key, vec] : pose_data) {
-        if (key.rfind("face_mesh_pts/", 0) == 0) { // starts with "face_mesh_pts/"
-            std::string subkey = key.substr(std::string("face_mesh_pts/").size());
+        if (key.rfind("poses/", 0) == 0) { // starts with "face_mesh_pts/"
+            std::string subkey = key.substr(std::string("poses/").size());
             face_mesh_pts[subkey] = vec;
         }
     }
@@ -265,7 +265,7 @@ Kinematics::head_orientation(
     // }
 
     // Required keys
-    std::vector<std::string> required_keys = {"nose_bridge", "l_tragus", "r_tragus"};
+    std::vector<std::string> required_keys = {"Nose", "LeftEar", "RightEar"};
 
     for (auto& k : required_keys) {
         if (face_mesh_pts.find(k) == face_mesh_pts.end()) {
@@ -286,9 +286,9 @@ Kinematics::head_orientation(
     }
 
     // Get points
-    Eigen::Vector3d nose = face_mesh_pts.at("nose_bridge");
-    Eigen::Vector3d l_trag = face_mesh_pts.at("l_tragus");
-    Eigen::Vector3d r_trag = face_mesh_pts.at("r_tragus");
+    Eigen::Vector3d nose = face_mesh_pts.at("Nose");
+    Eigen::Vector3d l_trag = face_mesh_pts.at("LeftEar");
+    Eigen::Vector3d r_trag = face_mesh_pts.at("RightEar");
     Eigen::Vector3d head_center = (l_trag + r_trag) / 2.0;
 
     // Local head coordinate frame
@@ -354,15 +354,15 @@ Kinematics::left_arm_orientation(
 
     std::map<std::string, Eigen::Vector3d> body_pts;
     for (auto& [key, vec] : pose_data) {
-        if (key.rfind("body_pts/", 0) == 0) {
-            std::string subkey = key.substr(std::string("body_pts/").size());
+        if (key.rfind("poses/", 0) == 0) {
+            std::string subkey = key.substr(std::string("poses/").size());
             body_pts[subkey] = vec;
         }
     }
 
-    std::vector<std::string> upper_keys = {"l_shoulder", "l_elbow"};
-    std::vector<std::string> lower_keys = {"l_elbow", "l_wrist","lock to"};
-    std::vector<std::string> hip_keys   = {"l_hip", "r_hip","lock2D"};
+    std::vector<std::string> upper_keys = {"LeftShoulder", "LeftElbow"};
+    std::vector<std::string> lower_keys = {"LeftElbow", "LeftWrist"};
+    std::vector<std::string> hip_keys   = {"LeftHip", "RightHip","lock2D"};
 
     auto has_keys = [&](const std::vector<std::string>& keys){
         return std::all_of(keys.begin(), keys.end(),
@@ -381,58 +381,46 @@ Kinematics::left_arm_orientation(
 
     // Upper arm
     if (has_keys(upper_keys)) {
-        Eigen::Vector3d l_shoulder = body_pts.at("l_shoulder");
-        Eigen::Vector3d l_elbow = body_pts.at("l_elbow");
+        Eigen::Vector3d l_shoulder = body_pts.at("LeftShoulder");
+        Eigen::Vector3d l_elbow = body_pts.at("LeftElbow");
         Eigen::Vector3d arm_vec = normalize(l_elbow - l_shoulder);
 
-        std::pair<double, double> lu_angles = Kinematics::vector_to_pitch_yaw(arm_vec, torso_matrix);
-        double pitch = lu_angles.first - M_PI/2.0;
-        double yaw   = lu_angles.second;
-        double roll  = 0.0;
+        Eigen::Vector3d x_axis = normalize(arm_vec.cross(torso_z));
+        Eigen::Vector3d z_axis = normalize(x_axis.cross(arm_vec));
+        Eigen::Vector3d y_axis = normalize(arm_vec);
 
-        Eigen::Quaterniond l_arm_upper_rel =
-            Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
-            Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
-            Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
+        Eigen::Matrix3d rot_matrix;
+        rot_matrix.col(0) = x_axis;
+        rot_matrix.col(1) = y_axis;
+        rot_matrix.col(2) = z_axis;
+
+        l_arm_upper_quat = Eigen::Quaterniond(rot_matrix)*torso_quat.inverse();  
+        l_arm_upper_euler = canonicalEuler(l_arm_upper_quat);
 
         if (!has_keys(hip_keys)) {
-            Eigen::Vector3d euler = l_arm_upper_rel.toRotationMatrix().eulerAngles(2,1,0);
-            l_arm_upper_rel =
-                Eigen::AngleAxisd(euler[0], Eigen::Vector3d::UnitZ()) *
-                Eigen::AngleAxisd(0, Eigen::Vector3d::UnitY()) *
-                Eigen::AngleAxisd(euler[2], Eigen::Vector3d::UnitX());
         }
-
-        l_arm_upper_euler = l_arm_upper_rel.toRotationMatrix().eulerAngles(2,1,0);
-        l_arm_upper_quat = l_arm_upper_rel;
     }
 
     // Lower arm
     if (has_keys(lower_keys)) {
-        Eigen::Vector3d l_elbow = body_pts.at("l_elbow");
-        Eigen::Vector3d l_wrist = body_pts.at("l_wrist");
+        Eigen::Vector3d l_elbow = body_pts.at("LeftElbow");
+        Eigen::Vector3d l_wrist = body_pts.at("LeftWrist");
         Eigen::Vector3d forearm_vec = normalize(l_wrist - l_elbow);
 
-        std::pair<double, double> ll_angles = Kinematics::vector_to_pitch_yaw(forearm_vec, torso_matrix);
-        double pitch = ll_angles.first - M_PI/2.0;
-        double yaw   = ll_angles.second;
-        double roll  = left_hand_roll - M_PI/2.0; // could add left_hand_roll if needed
+        Eigen::Vector3d x_axis = normalize(forearm_vec.cross(torso_z));
+        Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
+        Eigen::Vector3d y_axis = normalize(forearm_vec);
 
-        Eigen::Quaterniond l_arm_lower_rel =
-            Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
-            Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
-            Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
+        Eigen::Matrix3d rot_matrix;
+        rot_matrix.col(0) = x_axis;
+        rot_matrix.col(1) = y_axis;
+        rot_matrix.col(2) = z_axis;
+
+        l_arm_lower_quat = Eigen::Quaterniond(rot_matrix)*torso_quat.inverse();;  
+        l_arm_lower_euler = canonicalEuler(l_arm_lower_quat);
 
         if (!has_keys(hip_keys)) {
-            Eigen::Vector3d euler = l_arm_lower_rel.toRotationMatrix().eulerAngles(2,1,0);
-            l_arm_lower_rel =
-                Eigen::AngleAxisd(euler[0], Eigen::Vector3d::UnitZ()) *
-                Eigen::AngleAxisd(0, Eigen::Vector3d::UnitY()) *
-                Eigen::AngleAxisd(euler[2], Eigen::Vector3d::UnitX());
         }
-
-        l_arm_lower_euler = l_arm_lower_rel.toRotationMatrix().eulerAngles(2,1,0);
-        l_arm_lower_quat = l_arm_lower_rel;
     }
 
     angle_map["l_arm_upper"] = l_arm_upper_euler;
@@ -460,18 +448,17 @@ Kinematics::right_arm_orientation(
     Eigen::Vector3d euler_default(0,0,0);
     Eigen::Quaterniond quat_default(1,0,0,0); // identity
 
-    // Extract only body_pts/*
     std::map<std::string, Eigen::Vector3d> body_pts;
     for (auto& [key, vec] : pose_data) {
-        if (key.rfind("body_pts/", 0) == 0) {
-            std::string subkey = key.substr(std::string("body_pts/").size());
+        if (key.rfind("poses/", 0) == 0) {
+            std::string subkey = key.substr(std::string("poses/").size());
             body_pts[subkey] = vec;
         }
     }
 
-    std::vector<std::string> upper_keys = {"r_shoulder", "r_elbow"};
-    std::vector<std::string> lower_keys = {"r_elbow", "r_wrist"};
-    std::vector<std::string> hip_keys   = {"l_hip", "r_hip", "lock2D"};
+    std::vector<std::string> upper_keys = {"RightShoulder", "RightElbow"};
+    std::vector<std::string> lower_keys = {"RightElbow", "RightWrist"};
+    std::vector<std::string> hip_keys   = {"LeftHip", "RightHip", "lock2D"};
 
     auto has_keys = [&](const std::vector<std::string>& keys){
         return std::all_of(keys.begin(), keys.end(),
@@ -490,60 +477,48 @@ Kinematics::right_arm_orientation(
 
     // Upper arm
     if (has_keys(upper_keys)) {
-        Eigen::Vector3d r_shoulder = body_pts.at("r_shoulder");
-        Eigen::Vector3d r_elbow = body_pts.at("r_elbow");
+        Eigen::Vector3d r_shoulder = body_pts.at("RightShoulder");
+        Eigen::Vector3d r_elbow = body_pts.at("RightElbow");
         Eigen::Vector3d arm_vec = normalize(r_elbow - r_shoulder);
 
-        std::pair<double, double> ru_angles = Kinematics::vector_to_pitch_yaw(arm_vec, torso_matrix);
-        double pitch = -ru_angles.first - 3*(M_PI/2.0);
-        double yaw   = ru_angles.second;
-        double roll  = 0.0;
+        Eigen::Vector3d x_axis = normalize(arm_vec.cross(torso_z));
+        Eigen::Vector3d z_axis = normalize(x_axis.cross(arm_vec));
+        Eigen::Vector3d y_axis = normalize(arm_vec);
 
-        Eigen::Quaterniond r_arm_upper_rel =
-            Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
-            Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
-            Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
+        Eigen::Matrix3d rot_matrix;
+        rot_matrix.col(0) = x_axis;
+        rot_matrix.col(1) = y_axis;
+        rot_matrix.col(2) = z_axis;
+
+        r_arm_upper_quat = Eigen::Quaterniond(rot_matrix);
+        r_arm_upper_euler = canonicalEuler(r_arm_upper_quat)*-1;
 
         if (!has_keys(hip_keys)) {
-            Eigen::Vector3d euler = r_arm_upper_rel.toRotationMatrix().eulerAngles(2,1,0);
-            r_arm_upper_rel =
-                Eigen::AngleAxisd(euler[0], Eigen::Vector3d::UnitZ()) *
-                Eigen::AngleAxisd(0, Eigen::Vector3d::UnitY()) *
-                Eigen::AngleAxisd(euler[2], Eigen::Vector3d::UnitX());
         }
-
-        r_arm_upper_euler = r_arm_upper_rel.toRotationMatrix().eulerAngles(2,1,0);
-        r_arm_upper_quat = r_arm_upper_rel;
     }
 
     // Lower arm
     if (has_keys(lower_keys)) {
-        Eigen::Vector3d r_elbow = body_pts.at("r_elbow");
-        Eigen::Vector3d r_wrist = body_pts.at("r_wrist");
+        Eigen::Vector3d r_elbow = body_pts.at("RightElbow");
+        Eigen::Vector3d r_wrist = body_pts.at("RightWrist");
         Eigen::Vector3d forearm_vec = normalize(r_wrist - r_elbow);
 
-        std::pair<double, double> ru_angles = Kinematics::vector_to_pitch_yaw(forearm_vec, torso_matrix);
-        double pitch = -ru_angles.first - 3*(M_PI/2.0);
-        double yaw   = ru_angles.first;
-        double roll  = right_hand_roll + M_PI/2.0; // could add right_hand_roll if needed
+        Eigen::Vector3d x_axis = normalize(forearm_vec.cross(torso_z));
+        Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
+        Eigen::Vector3d y_axis = normalize(forearm_vec);
 
-        Eigen::Quaterniond r_arm_lower_rel =
-            Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
-            Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
-            Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
+        Eigen::Matrix3d rot_matrix;
+        rot_matrix.col(0) = x_axis;
+        rot_matrix.col(1) = y_axis;
+        rot_matrix.col(2) = z_axis;
+
+        r_arm_lower_quat = Eigen::Quaterniond(rot_matrix);
+        r_arm_lower_euler = canonicalEuler(r_arm_lower_quat)*-1;
 
         if (!has_keys(hip_keys)) {
-            Eigen::Vector3d euler = r_arm_lower_rel.toRotationMatrix().eulerAngles(2,1,0);
-            r_arm_lower_rel =
-                Eigen::AngleAxisd(euler[0], Eigen::Vector3d::UnitZ()) *
-                Eigen::AngleAxisd(0, Eigen::Vector3d::UnitY()) *
-                Eigen::AngleAxisd(euler[2], Eigen::Vector3d::UnitX());
         }
-
-        r_arm_lower_euler = r_arm_lower_rel.toRotationMatrix().eulerAngles(2,1,0);
-        r_arm_lower_quat = r_arm_lower_rel;
     }
-
+    
     angle_map["r_arm_upper"] = r_arm_upper_euler;
     angle_map["r_arm_lower"] = r_arm_lower_euler;
     quat_map["r_arm_upper"]  = r_arm_upper_quat;
@@ -551,6 +526,7 @@ Kinematics::right_arm_orientation(
 
     return {angle_map, quat_map};
 }
+
 
 // ========================
 // Hand Orientation
@@ -624,7 +600,7 @@ std::pair<double, double> Kinematics::get_hand_orientation(
     // Extract body_pts/*
     std::map<std::string, Eigen::Vector3d> body_pts;
     for (const auto& [key, vec] : pose_data) {
-        const std::string prefix = "body_pts/";
+        const std::string prefix = "poses/";
         if (key.rfind(prefix, 0) == 0) {
             std::string subkey = key.substr(prefix.size());
             body_pts[subkey] = vec;
@@ -639,45 +615,15 @@ std::pair<double, double> Kinematics::get_hand_orientation(
     //           << vec.z() << "]\n";
     // }
 
-
-    // Extract hand_pts/right/*
-    std::map<std::string, Eigen::Vector3d> right_hand_pts;
-    const std::string right_prefix = "hand_pts/right/";
-    for (const auto& [key, vec] : pose_data) {
-        if (key.rfind(right_prefix, 0) == 0) {
-            std::string subkey = key.substr(right_prefix.size());
-            right_hand_pts[subkey] = vec;
-        }
-    }
-
-    // std::cout << "Right Hand_pts" << std::endl;
-    // for (const auto& [key, vec] : right_hand_pts) {
-    // std::cout << key << ": [" 
-    //           << vec.x() << ", " 
-    //           << vec.y() << ", " 
-    //           << vec.z() << "]\n";
-    // }
-
-
-    // Extract hand_pts/left/*
-    std::map<std::string, Eigen::Vector3d> left_hand_pts;
-    const std::string left_prefix = "hand_pts/left/";
-    for (const auto& [key, vec] : pose_data) {
-        if (key.rfind(left_prefix, 0) == 0) {
-            std::string subkey = key.substr(left_prefix.size());
-            left_hand_pts[subkey] = vec;
-        }
-    }
-
     // Check required body keys
-    std::vector<std::string> required_body_keys = {"l_shoulder", "r_shoulder"};
+    std::vector<std::string> required_body_keys = {"LeftShoulder", "RightShoulder"};
     bool body_ok = std::all_of(required_body_keys.begin(), required_body_keys.end(),
                                 [&](const std::string& k){ return body_pts.find(k) != body_pts.end(); });
 
     if (!body_ok) return {left_hand_roll, right_hand_roll};
 
-    Eigen::Vector3d l_shoulder = body_pts.at("l_shoulder");
-    Eigen::Vector3d r_shoulder = body_pts.at("r_shoulder");
+    Eigen::Vector3d l_shoulder = body_pts.at("LeftShoulder");
+    Eigen::Vector3d r_shoulder = body_pts.at("RightShoulder");
     Eigen::Vector3d shoulder_vec = normalize(r_shoulder - l_shoulder);
 
     // Required hand keys
@@ -685,12 +631,12 @@ std::pair<double, double> Kinematics::get_hand_orientation(
 
     // Right hand
     bool right_ok = std::all_of(hand_keys.begin(), hand_keys.end(),
-                                [&](const std::string& k){ return right_hand_pts.find(k) != right_hand_pts.end(); });
+                                [&](const std::string& k){ return body_pts.find(k) != body_pts.end(); });
     if (right_ok) {
         right_hand_roll = compute_hand_roll(
-            right_hand_pts.at("index_base"),
-            right_hand_pts.at("wrist"),
-            right_hand_pts.at("pinky_base"),
+            body_pts.at("index_base"),
+            body_pts.at("wrist"),
+            body_pts.at("pinky_base"),
             shoulder_vec,
             nullptr,
             true
@@ -699,12 +645,12 @@ std::pair<double, double> Kinematics::get_hand_orientation(
 
     // Left hand
     bool left_ok = std::all_of(hand_keys.begin(), hand_keys.end(),
-                               [&](const std::string& k){ return left_hand_pts.find(k) != left_hand_pts.end(); });
+                               [&](const std::string& k){ return body_pts.find(k) != body_pts.end(); });
     if (left_ok) {
         left_hand_roll = compute_hand_roll(
-            left_hand_pts.at("index_base"),
-            left_hand_pts.at("wrist"),
-            left_hand_pts.at("pinky_base"),
+            body_pts.at("index_base"),
+            body_pts.at("wrist"),
+            body_pts.at("pinky_base"),
             shoulder_vec,
             nullptr,
             false
