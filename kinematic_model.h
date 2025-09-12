@@ -25,10 +25,7 @@ private:
 
     static Eigen::Vector3d toEulerRadians(const Eigen::Matrix3d& rot_matrix);
 
-    double prev_left_angle;
-    double prev_right_angle;
-    bool prev_left_angle_initialized;
-    bool prev_right_angle_initialized;
+    Eigen::Vector3d to_euler(const Eigen::Quaterniond& q, const std::string& euler = "ZYX");
 
 public:
     Kinematics();
@@ -55,7 +52,7 @@ public:
     // ========================
     // Left Arm orientation
     // ========================
-    static std::pair<
+    std::pair<
         std::map<std::string, Eigen::Vector3d>,
         std::map<std::string, Eigen::Quaterniond>
     > left_arm_orientation(
@@ -66,7 +63,7 @@ public:
     // ========================
     // Right Arm orientation
     // ========================
-    static std::pair<
+    std::pair<
         std::map<std::string, Eigen::Vector3d>,
         std::map<std::string, Eigen::Quaterniond>
     > right_arm_orientation(
@@ -76,15 +73,6 @@ public:
 
     // Compute head & shoulder kinematics and update internal storage
     void kinematics_neck(const std::map<std::string, Eigen::Vector3d>& pose_data);
-
-    // Get left and right hand orientation
-    std::pair<double, double> get_hand_orientation(
-        const std::map<std::string, Eigen::Vector3d>& pose_data
-    );
-
-    // Optional getters for latest stored values
-    std::map<std::string, Eigen::Vector3d> latest_angles() const;
-    std::map<std::string, Eigen::Quaterniond> latest_quaternions() const;
 
     // --------------------------
     // New function: generate structured JSON-like map

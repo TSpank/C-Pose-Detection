@@ -21,10 +21,6 @@
 // Constructor
 // ========================
 Kinematics::Kinematics()
-    : prev_left_angle(0.0),
-      prev_right_angle(0.0),
-      prev_left_angle_initialized(false),
-      prev_right_angle_initialized(false)
 {
     // Constructor body can be empty if no other initialization needed
 }
@@ -38,23 +34,101 @@ Eigen::Vector3d Kinematics::normalize(const Eigen::Vector3d& v) {
     return v / norm;
 }
 
-Eigen::Vector3d canonicalEuler(const Eigen::Quaterniond& q) {
-    // Create a new quaternion instead of modifying the const input
-    Eigen::Quaterniond quat = q;
+#include <Eigen/Dense>
+#include <cmath>
 
-    // Flip quaternion to consistent branch
-    if (quat.w() < 0) quat = Eigen::Quaterniond(-quat.w(), -quat.x(), -quat.y(), -quat.z());
+Eigen::Vector3d Kinematics::to_euler(
+    const Eigen::Quaterniond& q,
+    const std::string& euler
+) {
+    // Normalize the input quaternion
+    Eigen::Quaterniond q_n = q.normalized(); // or use your custom normalize()
 
-    // Compute angles using atan2 / asin manually
-    double roll  = atan2(2*(quat.w()*quat.x() + quat.y()*quat.z()), 1 - 2*(quat.x()*quat.x() + quat.y()*quat.y()));
-    double pitch = asin( std::clamp(2*(quat.w()*quat.y() - quat.z()*quat.x()), -1.0, 1.0) );
-    double yaw   = atan2(2*(quat.w()*quat.z() + quat.x()*quat.y()), 1 - 2*(quat.y()*quat.y() + quat.z()*quat.z()));
+    double x = q_n.x();
+    double y = q_n.y();
+    double z = q_n.z();
+    double w = q_n.w();
 
-    // Wrap angles to [-pi, pi] if needed
-    Eigen::Vector3d euler(yaw, pitch, roll); // adjust order to match ZYX
+    // Calculate rotation matrix elements
+    double m11 = 1.0 - 2.0 * (y * y + z * z);
+    double m12 = 2.0 * x * y - 2.0 * w * z;
+    double m13 = 2.0 * x * z + 2.0 * w * y;
+    double m21 = 2.0 * x * y + 2.0 * w * z;
+    double m22 = 1.0 - 2.0 * (x * x + z * z);
+    double m23 = 2.0 * y * z - 2.0 * w * x;
+    double m31 = 2.0 * x * z - 2.0 * w * y;
+    double m32 = 2.0 * y * z + 2.0 * w * x;
+    double m33 = 1.0 - 2.0 * (x * x + y * y);
 
-    return euler;
+    double roll = 0.0, pitch = 0.0, yaw = 0.0;
+    const double GIMBAL_LOCK_THRESHOLD = 0.9999999;
+
+    // Uppercase Euler string for comparison
+    std::string euler_upper = euler;
+    for (char& c : euler_upper) c = std::toupper(c);
+
+    if (euler_upper == "ZYX") {
+        pitch = std::asin(-m31);
+        if (std::abs(m31) < GIMBAL_LOCK_THRESHOLD) {
+            roll = std::atan2(m32, m33);
+            yaw  = std::atan2(m21, m11);
+        } else {
+            roll = 0.0;
+            yaw  = std::atan2(-m12, m22);
+        }
+    } else if (euler_upper == "YXZ") {
+        roll = std::asin(-m23);
+        if (std::abs(m23) < GIMBAL_LOCK_THRESHOLD) {
+            pitch = std::atan2(m13, m33);
+            yaw   = std::atan2(m21, m22);
+        } else {
+            pitch = std::atan2(-m31, m11);
+            yaw   = 0.0;
+        }
+    } else if (euler_upper == "XYZ") {
+        pitch = std::asin(m13);
+        if (std::abs(m13) < GIMBAL_LOCK_THRESHOLD) {
+            roll = std::atan2(-m23, m33);
+            yaw  = std::atan2(-m12, m11);
+        } else {
+            roll = std::atan2(m32, m22);
+            yaw  = 0.0;
+        }
+    } else if (euler_upper == "ZXY") {
+        roll = std::asin(m32);
+        if (std::abs(m32) < GIMBAL_LOCK_THRESHOLD) {
+            pitch = std::atan2(-m31, m33);
+            yaw   = std::atan2(-m12, m22);
+        } else {
+            pitch = 0.0;
+            yaw   = std::atan2(m21, m11);
+        }
+    } else if (euler_upper == "YZX") {
+        yaw = std::asin(m21);
+        if (std::abs(m21) < GIMBAL_LOCK_THRESHOLD) {
+            roll  = std::atan2(-m23, m22);
+            pitch = std::atan2(-m31, m11);
+        } else {
+            roll  = 0.0;
+            pitch = std::atan2(m13, m33);
+        }
+    } else if (euler_upper == "XZY") {
+        yaw = std::asin(-m12);
+        if (std::abs(m12) < GIMBAL_LOCK_THRESHOLD) {
+            roll  = std::atan2(m32, m22);
+            pitch = std::atan2(m13, m11);
+        } else {
+            roll  = std::atan2(-m23, m33);
+            pitch = 0.0;
+        }
+    } else {
+        std::cerr << "Warning: Invalid Euler order string. Returning (0,0,0).\n";
+    }
+
+    return {yaw, pitch, roll};
 }
+
+
 // ========================
 // Torso orientation
 // ========================
@@ -114,7 +188,7 @@ std::pair<
         rot_matrix.col(2) = z_axis;
 
         Eigen::Quaterniond quat(rot_matrix);
-        Eigen::Vector3d euler = canonicalEuler(quat);
+        Eigen::Vector3d euler = to_euler(quat);
         
         angle_map["torso"] = euler;
         quat_map["torso"]  = quat;
@@ -135,7 +209,7 @@ std::pair<
         rot_matrix.col(2) = z_axis;
 
         Eigen::Quaterniond quat(rot_matrix);
-        Eigen::Vector3d euler = canonicalEuler(quat);
+        Eigen::Vector3d euler = to_euler(quat);
 
         angle_map["torso"] = euler;
         quat_map["torso"]  = quat;
@@ -175,28 +249,12 @@ Kinematics::head_orientation(
         }
     }
 
-    // for (const auto& [key, vec] : face_mesh_pts) {
-    // std::cout << key << ": [" 
-    //           << vec.x() << ", " 
-    //           << vec.y() << ", " 
-    //           << vec.z() << "]\n";
-    // }
-
     // Required keys
     std::vector<std::string> required_keys = {"Nose", "LeftEar", "RightEar"};
 
     for (auto& k : required_keys) {
         if (face_mesh_pts.find(k) == face_mesh_pts.end()) {
-            // std::cout << "head_euler: ["
-            //         << head_euler.x() << ", "
-            //         << head_euler.y() << ", "
-            //         << head_euler.z() << "]" << std::endl;
-
-            // std::cout << "head_quat: ["
-            //         << head_quat.w() << ", "
-            //         << head_quat.x() << ", "
-            //         << head_quat.y() << ", "
-            //         << head_quat.z() << "]" << std::endl;
+      
             head_euler_map["head"] = head_euler;
             head_quat_map["head"] = head_quat;
             return {head_euler_map, head_quat_map};
@@ -233,21 +291,10 @@ Kinematics::head_orientation(
     Eigen::Quaterniond q_rel = quat * torso_quat.inverse();
 
     head_quat = q_rel;
-    head_euler = canonicalEuler(head_quat);
+    head_euler = to_euler(q_rel);
 
     head_euler_map["head"] = head_euler;
     head_quat_map["head"] = head_quat;
-
-    // std::cout << "head_euler: ["
-    //       << head_euler.x() << ", "
-    //       << head_euler.y() << ", "
-    //       << head_euler.z() << "]" << std::endl;
-
-    // std::cout << "head_quat: ["
-    //         << head_quat.w() << ", "
-    //         << head_quat.x() << ", "
-    //         << head_quat.y() << ", "
-    //         << head_quat.z() << "]" << std::endl;
 
     return {head_euler_map, head_quat_map};
 }
@@ -343,8 +390,8 @@ Kinematics::left_arm_orientation(
         rot_matrix.col(2) = z_axis;
 
         upper_quat = Eigen::Quaterniond(rot_matrix);
-        l_arm_upper_quat = upper_quat * torso_quat.inverse();
-        l_arm_upper_euler = canonicalEuler(upper_quat * torso_quat.inverse());
+        l_arm_upper_quat = torso_quat.inverse()*upper_quat;
+        l_arm_upper_euler = to_euler(upper_quat * torso_quat.inverse());
     }
 
     // Lower arm (elbow to wrist)
@@ -361,8 +408,8 @@ Kinematics::left_arm_orientation(
         // Optional hand normal vector
         std::optional<Eigen::Vector3d> left_hand_normal_vector = hand_normal_vector(body_pts, "right");
         if (left_hand_normal_vector) {
-            z_axis = -(*left_hand_normal_vector);
-            x_axis = forearm_vec.cross(z_axis).normalized();
+            z_axis = normalize(-(*left_hand_normal_vector));
+            x_axis = normalize(forearm_vec.cross(z_axis));
             y_axis = forearm_vec;
         }
 
@@ -373,7 +420,7 @@ Kinematics::left_arm_orientation(
 
         lower_quat = Eigen::Quaterniond(rot_matrix);
         l_arm_lower_quat = upper_quat.inverse() * lower_quat;
-        l_arm_lower_euler = canonicalEuler(lower_quat * torso_quat.inverse());
+        l_arm_lower_euler = to_euler(lower_quat* torso_quat.inverse());
 
         // Recompute upper arm orientation if both upper & lower exist
         if (has_keys(upper_keys)) {
@@ -391,7 +438,7 @@ Kinematics::left_arm_orientation(
 
             upper_quat = Eigen::Quaterniond(rot_matrix);
             l_arm_upper_quat = torso_quat.inverse() * upper_quat;
-            l_arm_upper_euler = canonicalEuler(upper_quat * torso_quat.inverse());
+            l_arm_upper_euler = to_euler(upper_quat * torso_quat.inverse());
         }
     }
 
@@ -464,7 +511,7 @@ Kinematics::right_arm_orientation(
 
         upper_quat = Eigen::Quaterniond(rot_matrix);
         r_arm_upper_quat = upper_quat * torso_quat.inverse();
-        r_arm_upper_euler = canonicalEuler(upper_quat * torso_quat.inverse());
+        r_arm_upper_euler = to_euler(upper_quat * torso_quat.inverse());
     }
 
     // Lower arm (elbow to wrist)
@@ -481,7 +528,7 @@ Kinematics::right_arm_orientation(
         // Optional hand normal vector
         std::optional<Eigen::Vector3d> right_hand_normal_vector = hand_normal_vector(body_pts, "left");
         if (right_hand_normal_vector) {
-            z_axis = -(*right_hand_normal_vector);
+            z_axis = (*right_hand_normal_vector);
             x_axis = forearm_vec.cross(z_axis).normalized();
             y_axis = forearm_vec;
         }
@@ -493,7 +540,7 @@ Kinematics::right_arm_orientation(
 
         lower_quat = Eigen::Quaterniond(rot_matrix);
         r_arm_lower_quat = upper_quat.inverse() * lower_quat;
-        r_arm_lower_euler = canonicalEuler(lower_quat * torso_quat.inverse());
+        r_arm_lower_euler = to_euler(lower_quat * torso_quat.inverse());
 
         // Recompute upper arm orientation if both upper & lower exist
         if (has_keys(upper_keys)) {
@@ -511,7 +558,7 @@ Kinematics::right_arm_orientation(
 
             upper_quat = Eigen::Quaterniond(rot_matrix);
             r_arm_upper_quat = torso_quat.inverse() * upper_quat;
-            r_arm_upper_euler = canonicalEuler(upper_quat * torso_quat.inverse());
+            r_arm_upper_euler = to_euler(upper_quat * torso_quat.inverse());
         }
     }
 
@@ -560,14 +607,27 @@ void Kinematics::kinematics_neck(
     kinematic_quaternions.push_back(merged_quats);
 
     // Print merged_angles
-    std::cout << "Merged Angles (degrees): " << std::endl;
-    for (const auto& kv : merged_angles) {
-        Eigen::Vector3d euler_deg = kv.second * (180.0 / M_PI);
-        std::cout << "  " << kv.first << " : ["
-                << euler_deg.x() << ", "
-                << euler_deg.y() << ", "
-                << euler_deg.z() << "]" << std::endl;
-    }
+    // std::cout << "Merged Angles (degrees): " << std::endl;
+    // for (const auto& kv : merged_angles) {
+    //     Eigen::Vector3d euler_deg = kv.second * (180.0 / M_PI);
+    //     std::cout << "  " << kv.first << " : ["
+    //             << euler_deg.x() << ", "
+    //             << euler_deg.y() << ", "
+    //             << euler_deg.z() << "]" << std::endl;
+    // }
+
+    // std::string key = "l_arm_lower";  // replace with the key you want
+    // auto it = merged_angles.find(key);
+
+    // if (it != merged_angles.end()) {
+    //     Eigen::Vector3d euler_deg = it->second * (180.0 / M_PI);
+    //     std::cout << key << " : ["
+    //             << euler_deg.x() << ", "
+    //             << euler_deg.y() << ", "
+    //             << euler_deg.z() << "]" << std::endl;
+    // } else {
+    //     std::cout << "Key not found: " << key << std::endl;
+    // }
 
 }
 
@@ -585,6 +645,10 @@ std::map<std::string, double> Kinematics::structure_json_from_kinematics_history
         return Eigen::Vector3d(-v.x(), -v.y(), v.z());
     };
 
+    auto reverse_yaw_direction = [](const Eigen::Vector3d& v) -> Eigen::Vector3d {
+        return Eigen::Vector3d(v.x(), v.y(), -v.z());
+    };
+
     Eigen::Vector3d torso = kinematic_angles_last.count("torso") ? kinematic_angles_last.at("torso") : Eigen::Vector3d::Zero();
     Eigen::Vector3d head  = kinematic_angles_last.count("head")  ? kinematic_angles_last.at("head")  : Eigen::Vector3d::Zero();
 
@@ -595,6 +659,9 @@ std::map<std::string, double> Kinematics::structure_json_from_kinematics_history
 
     auto torso_rev = reverse_yaw_roll_direction(torso);
     auto head_rev  = reverse_yaw_roll_direction(head);
+
+    auto l_arm_1_rev  = reverse_yaw_direction(l_arm_1);
+    auto l_arm_2_rev  = reverse_yaw_direction(l_arm_2);
 
     std::map<std::string, double> pose;
 
@@ -628,21 +695,21 @@ std::map<std::string, double> Kinematics::structure_json_from_kinematics_history
     // Arms
     arms = true;
     if (arms) {
-        pose["theta_armright_upper_alpha"] = r_arm_1.x();
-        pose["theta_armright_upper_beta"]  = r_arm_1.y();
-        pose["theta_armright_upper_gamma"] = r_arm_1.z();
+        pose["theta_armright_upper_alpha"] = r_arm_1.z();
+        pose["theta_armright_upper_beta"]  = r_arm_1.x();
+        pose["theta_armright_upper_gamma"] = r_arm_1.y();
 
-        pose["theta_armleft_upper_alpha"] = l_arm_1.x();
-        pose["theta_armleft_upper_beta"]  = l_arm_1.y();
-        pose["theta_armleft_upper_gamma"] = l_arm_1.z();
+        pose["theta_armleft_upper_alpha"] = l_arm_1_rev.x();
+        pose["theta_armleft_upper_beta"]  = l_arm_1_rev.z();
+        pose["theta_armleft_upper_gamma"] = l_arm_1_rev.y();
 
         pose["theta_armright_lower_alpha"] = r_arm_2.x();
-        pose["theta_armright_lower_beta"]  = r_arm_2.y();
-        pose["theta_armright_lower_gamma"] = r_arm_2.z();
+        pose["theta_armright_lower_beta"]  = r_arm_2.z();
+        pose["theta_armright_lower_gamma"] = r_arm_2.y() + (90.0 * M_PI / 180.0);
 
-        pose["theta_armleft_lower_alpha"]  = l_arm_2.x();
-        pose["theta_armleft_lower_beta"]   = l_arm_2.y();
-        pose["theta_armleft_lower_gamma"]  = -l_arm_2.z();
+        pose["theta_armleft_lower_alpha"]  = l_arm_2_rev.x();
+        pose["theta_armleft_lower_beta"]   = l_arm_2_rev.z();
+        pose["theta_armleft_lower_gamma"]  = l_arm_2_rev.y() + (90.0 * M_PI / 180.0);
     } else {
         std::vector<std::string> keys = {
             "theta_armright_upper_alpha", "theta_armright_upper_beta", "theta_armright_upper_gamma",
@@ -691,19 +758,4 @@ std::map<std::string, nlohmann::json> Kinematics::structure_json_from_kinematics
     }
 
     return pose;
-}
-
-
-
-// ========================
-// Getters for latest stored values
-// ========================
-std::map<std::string, Eigen::Vector3d> Kinematics::latest_angles() const {
-    if (!kinematic_angles.empty()) return kinematic_angles.back();
-    return {};
-}
-
-std::map<std::string, Eigen::Quaterniond> Kinematics::latest_quaternions() const {
-    if (!kinematic_quaternions.empty()) return kinematic_quaternions.back();
-    return {};
 }
