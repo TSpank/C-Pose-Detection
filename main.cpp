@@ -5,34 +5,9 @@
 #include <thread>
 #include <nlohmann/json.hpp>
 #include "kinematic_model.h"
+#include "mqttStickman.h"
 
 using json = nlohmann::json;
-
-json structure_pose_payload(const json& pose_json_angles, bool include_camera = false) {
-    auto now = std::chrono::system_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()
-    ).count();
-
-    json pose_data = pose_json_angles;
-    pose_data["timestamp"] = ms;
-
-    json payload;
-    payload["pose"] = pose_data;
-
-    if (include_camera) {
-        json camera_data = {
-            {"position", {{"x", -1.0}, {"y", 1.6}, {"z", 0.0}}},
-            {"target",   {{"x",  0.0}, {"y", 1.6}, {"z", 0.0}}},
-            {"mimic", false},
-            {"cam_animation", false}
-        };
-        payload["camera"] = camera_data;
-    }
-
-    return payload;
-}
-
 
 // Fix static linking issue
 namespace mqtt {
@@ -40,52 +15,131 @@ namespace mqtt {
 }
 
 // MQTT configuration constants...
-const std::string SUB_SERVER_ADDRESS("tcp://localhost:1883");
+const std::string SUB_SERVER_ADDRESS("tcp://207.154.244.181:1883");
 const std::string SUB_CLIENT_ID("listener_client");
-const std::string SUB_TOPIC("mediapipe/data");
+const std::string SUB_TOPIC("mojo/ten/1/t/210/p/52/e/0");
+const std::string SUB_USERNAME("scope_mosquitto");
+const std::string SUB_PASSWORD("dektzOWb3pmI");
 
-const std::string PUB_SERVER_ADDRESS("tcp://207.154.244.181");
+const std::string PUB_SERVER_ADDRESS("tcp://207.154.244.181:1883");
 const std::string PUB_CLIENT_ID("publisher_client");
 const std::string PUB_TOPIC("mojo/iOS/1234");
+const std::string PUB_USERNAME("scope_mosquitto");
+const std::string PUB_PASSWORD("dektzOWb3pmI");
+
+const std::string PUB_SERVER_ADDRESS_python("tcp://localhost:1883");
+const std::string PUB_CLIENT_ID_python("publisher_client");
+const std::string PUB_TOPIC_python("mojo/iOS/1234");
+const std::string PUB_TOPIC_python_quats("mojo/iOS/quats");
+
+Eigen::Vector3d normalize(const Eigen::Vector3d& v) {
+    double norm = v.norm();
+    if (norm == 0.0) return Eigen::Vector3d::Zero();
+    return v / norm;
+}
+
+// -----------------------------------------------------------------------------
+// Determine handedness (Left / Right) from nlohmann::json landmarks
+// -----------------------------------------------------------------------------
+std::string determine_handedness(const json& hand_pts) {
+    // Helper lambda to extract 3D point safely
+    auto vec3 = [&](const std::string& name) -> Eigen::Vector3d {
+        if (!hand_pts.contains(name))
+            throw std::invalid_argument("Missing landmark: " + name);
+        const auto& pt = hand_pts.at(name);
+        return Eigen::Vector3d(-pt.at("y").get<double>(),
+                               pt.at("x").get<double>(),
+                               pt.at("z").get<double>());
+    };
+
+    // Extract and convert to your coordinate system (-y, x, z)
+    auto transform = [](const Eigen::Vector3d& v) {
+        return Eigen::Vector3d(-v(1), v(0), v(2));
+    };
+
+    Eigen::Vector3d middleFingerTip = transform(vec3("MiddleFingerTip"));
+    Eigen::Vector3d middleFingerBase = transform(vec3("MiddleFingerBase"));
+    Eigen::Vector3d palm_vec = normalize(middleFingerTip - middleFingerBase);
+
+    Eigen::Vector3d palmBase = transform(vec3("PalmBase"));
+    Eigen::Vector3d indexFingerBase = transform(vec3("IndexFingerBase"));
+
+    // Compute reference vectors
+    Eigen::Vector3d dir1 = middleFingerBase - indexFingerBase;
+    Eigen::Vector3d dir2 = middleFingerBase - palmBase;
+    Eigen::Vector3d ref_vec = normalize(dir1.cross(dir2));
+
+    double handedness_value = palm_vec.dot(ref_vec);
+
+    return (handedness_value > 0.0) ? "Left" : "Right";
+}
 
 void extract_pose_data(
     const json& j,
-    const std::string& path,
-    std::map<std::string, Eigen::Vector3d>& pose_data)
+    std::map<std::string, Eigen::Vector3d>& pose_data,
+    long long& timestamp)
 {
-    if (j.is_object()) {
-        for (auto& [key, val] : j.items()) {
-            std::string new_path = path.empty() ? key : path + "/" + key;
+    // === Extract hands ===
+    if (j.contains("handOutput") && j["handOutput"].contains("hands")) {
+        for (auto& [hand_name, landmarks] : j["handOutput"]["hands"].items()) {
+            if (hand_name == "unknown"){
+                std::string hand_name = determine_handedness(landmarks);
+            }
+            for (auto& [landmark_name, coords] : landmarks.items()) {
+                if (coords.contains("x") && coords.contains("y") && coords.contains("z")) {
+                    std::string full_name;
+                    if (hand_name == "Right")
+                        full_name = "right" + landmark_name;
+                    else if (hand_name == "Left")
+                        full_name = "left" + landmark_name;
+                    else
+                        continue;
 
-            // New case: object with "x", "y", "z" keys
-            if (val.is_object() && val.contains("x") && val.contains("y") && val.contains("z") &&
-                val["x"].is_number() && val["y"].is_number() && val["z"].is_number())
-            {
-                pose_data[new_path] = Eigen::Vector3d(
-                    val["x"].get<double>(),
-                    val["y"].get<double>(),
-                    val["z"].get<double>()
-                );
-            }
-            // Old case: array of size 3
-            else if (val.is_array() && val.size() == 3 &&
-                     val[0].is_number() && val[1].is_number() && val[2].is_number())
-            {
-                pose_data[new_path] = Eigen::Vector3d(
-                    val[0].get<double>(),
-                    val[1].get<double>(),
-                    val[2].get<double>()
-                );
-            }
-            else {
-                extract_pose_data(val, new_path, pose_data);
+                    pose_data[full_name] = Eigen::Vector3d(
+                        -coords["y"].get<double>(),
+                        coords["x"].get<double>(),
+                        coords["z"].get<double>()
+                    );
+                }
             }
         }
     }
-    else if (j.is_array()) {
-        for (size_t i = 0; i < j.size(); ++i) {
-            std::string new_path = path + "[" + std::to_string(i) + "]";
-            extract_pose_data(j[i], new_path, pose_data);
+
+    // === Extract pose landmarks and timestamp ===
+    if (j.contains("poseOutput")) {
+
+        const auto& poseOutput = j["poseOutput"];
+
+        // --- Extract timestamp if present ---
+        if (poseOutput.contains("timestampMs") && poseOutput["timestampMs"].is_number()) {
+            timestamp = poseOutput["timestampMs"].get<long long>();
+            std::cout << "Pose timestamp: " << timestamp << std::endl;
+        }
+
+        // --- Extract poses ---
+        if (poseOutput.contains("poses")) {
+            for (auto& [name, coords] : poseOutput["poses"].items()) {
+                if (coords.contains("x") && coords.contains("y") && coords.contains("z")) {
+                    pose_data[name] = Eigen::Vector3d(
+                        -coords["y"].get<double>(),
+                        coords["x"].get<double>(),
+                        coords["z"].get<double>()
+                    );
+                }
+            }
+        }
+    }
+
+    // === Extract face landmarks ===
+    if (j.contains("faceOutput") && j["faceOutput"].contains("faces")) {
+        for (auto& [name, coords] : j["faceOutput"]["faces"].items()) {
+            if (coords.contains("x") && coords.contains("y") && coords.contains("z")) {
+                pose_data[name] = Eigen::Vector3d(
+                    -coords["y"].get<double>(),
+                    coords["x"].get<double>(),
+                    coords["z"].get<double>()
+                );
+            }
         }
     }
 }
@@ -94,13 +148,18 @@ void extract_pose_data(
 int main() {
     Kinematics kinematics;
 
-    // Subscriber setup
+     // === Subscriber setup ===
     mqtt::client sub_client(SUB_SERVER_ADDRESS, SUB_CLIENT_ID);
+    mqtt::connect_options sub_connOpts;
+    sub_connOpts.set_clean_session(true);
+    sub_connOpts.set_user_name(SUB_USERNAME);
+    sub_connOpts.set_password(SUB_PASSWORD);
+
     try {
-        mqtt::connect_options sub_connOpts;
-        sub_connOpts.set_clean_session(true);
+        std::cout << "Connecting to subscriber MQTT broker..." << std::endl;
         sub_client.connect(sub_connOpts);
         std::cout << "Connected to subscriber MQTT broker at " << SUB_SERVER_ADDRESS << std::endl;
+
         sub_client.subscribe(SUB_TOPIC, 1);
         std::cout << "Subscribed to topic: " << SUB_TOPIC << std::endl;
     }
@@ -109,12 +168,12 @@ int main() {
         return 1;
     }
 
-    // Publisher setup
+    // === Publisher setup ===
     mqtt::client pub_client(PUB_SERVER_ADDRESS, PUB_CLIENT_ID);
     mqtt::connect_options pub_connOpts;
     pub_connOpts.set_clean_session(true);
-    pub_connOpts.set_user_name("scope_mosquitto");
-    pub_connOpts.set_password("dektzOWb3pmI");
+    pub_connOpts.set_user_name(PUB_USERNAME);
+    pub_connOpts.set_password(PUB_PASSWORD);
 
     try {
         std::cout << "Connecting to publisher MQTT broker..." << std::endl;
@@ -126,44 +185,101 @@ int main() {
         return 1;
     }
 
+    // === Publisher setup python ===
+    mqtt::client pub_client_python(PUB_SERVER_ADDRESS_python, PUB_CLIENT_ID_python);
+    mqtt::connect_options pub_connOpts_python;
+    pub_connOpts_python.set_clean_session(true);
+
+    try {
+        std::cout << "Connecting to publisher MQTT broker..." << std::endl;
+        pub_client_python.connect(pub_connOpts_python);
+        std::cout << "Connected to publisher broker!" << std::endl;
+    }
+    catch (const mqtt::exception& exc) {
+        std::cerr << "Publisher connection error: " << exc.what() << std::endl;
+        return 1;
+    }
+
     // Main loop: receive -> compute -> publish
     auto start = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(100)) {
+
+    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(1000)) {
         mqtt::const_message_ptr msg(nullptr);
         if (sub_client.try_consume_message_for(&msg, std::chrono::milliseconds(100)) && msg) {
             try {
+                // === timestamp ===
+                long long timestamp = 0;
+       
                 std::map<std::string, Eigen::Vector3d> pose_data;
+                // Parse incoming JSON message
                 json json_msg = json::parse(msg->to_string());
+          
 
-                extract_pose_data(json_msg, "", pose_data);
+                extract_pose_data(json_msg, pose_data, timestamp);
+                auto kinematic_output = kinematics.process_kinematics(pose_data);
+                auto angles_map = kinematics.avatar_json(kinematic_output.eulerAngles);
+     
+                // // Prepare JSON for angles
+                json json_angles;
+                for (const auto& [key, value] : angles_map) {
+                    json_angles[key] = value;
+                }
+                
+                nlohmann::json payload;
+                payload["pose"] = json_angles;
+                payload["timestamp"] = timestamp; 
 
-                kinematics.kinematics_neck(pose_data);
+                // // Prepare JSON for quats
+                // json json_quats;
+                // for (const auto& [key, value] : quats_map) {
+                //     json_quats[key] = value;
+                // }
+                
+                // nlohmann::json payload_quat;
+                // payload_quat = json_quats;
+                // payload_quat["timestamp"] = timestamp;
 
-                auto pose_json_angles = Kinematics::structure_json_from_kinematics_history_angles(
-                    kinematics.get_kinematic_angles(),
-                    true, true, true);
-
-                auto pose_json_quats = Kinematics::structure_json_from_kinematics_history_quats(
-                    kinematics.get_kinematic_quaternions());
-
-                json json_out_angles(pose_json_angles);
-                json payload_angles = structure_pose_payload(json_out_angles, false);
-                json json_out_quats(pose_json_quats);
-
-                // // // DEBUG: print JSON Angles being published 
-                // std::cout << "Publishing JSON angles:\n" << json_out_angles.dump(4) << std::endl;
-
-                // // // DEBUG: print JSON quats being published 
-                // std::cout << "Publishing JSON quats:\n" << json_out_quats.dump(4) << std::endl;
-
-                auto pubmsg = mqtt::make_message(PUB_TOPIC, payload_angles.dump());
+                // // Publish angles as MQTT message
+                auto pubmsg = mqtt::make_message(PUB_TOPIC, payload.dump());
                 pubmsg->set_qos(1);
                 pub_client.publish(pubmsg);
-                std::cout << "Published processed pose to topic: " << PUB_TOPIC << std::endl;
+                // pub_client_python.publish(pubmsg);
+
+                // // Publish quats as MQTT message
+                // auto pubmsg_quat = mqtt::make_message(PUB_TOPIC_python_quats, payload_quat.dump());
+                // pubmsg_quat->set_qos(1);
+                // pub_client_python.publish(pubmsg_quat);
+
+                std::cout << "Published: " << PUB_TOPIC << std::endl;
 
             } catch (const std::exception& e) {
-                std::cerr << "Error processing message: " << e.what() << std::endl;
-            }
+                                                try {
+                                                    std::string msg_str = msg ? msg->to_string() : "<no message>";
+                                                    std::cerr << "\n===================== EXCEPTION CAUGHT =====================\n";
+                                                    std::cerr << "Exception: " << e.what() << "\n";
+
+                                                    // Type information
+                                                    std::cerr << "Exception type: " << typeid(e).name() << "\n";
+
+                                                    // If available, show where in code this happened
+                                                    // (only works if compiled with -g)
+                                                    std::cerr << "Occurred during message processing.\n";
+
+                                                    // Show the message that caused the error
+                                                    std::cerr << "Offending MQTT message payload:\n" << msg_str << "\n";
+
+                                                    // If using nlohmann::json, catch parse errors specifically
+                                                    if (auto* je = dynamic_cast<const nlohmann::json::parse_error*>(&e)) {
+                                                        std::cerr << "JSON Parse error: " << je->what()
+                                                                << "\nByte position: " << je->byte << "\n";
+                                                    }
+
+                                                    std::cerr << "===========================================================\n\n";
+                                                }
+                                                catch (...) {
+                                                    std::cerr << "⚠️  Exception while handling another exception!\n";
+                                                }
+                                            }
         }
     }
 

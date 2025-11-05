@@ -97,6 +97,7 @@
         "xtree": "cpp",
         "xutility": "cpp",
         "*.inc": "cpp",
-        "geometry": "cpp"
+        "geometry": "cpp",
+        "dense": "cpp"
     }
 }
