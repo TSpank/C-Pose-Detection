@@ -28,7 +28,11 @@ Kinematics::Kinematics()
      prev_l2_quat_(1, 0, 0, 0), has_prev_l2_quat_(false),
      prev_r1_quat_(1, 0, 0, 0), has_prev_r1_quat_(false),
      prev_r2_quat_(1, 0, 0, 0), has_prev_r2_quat_(false),
-     z_scale(0.0) {}
+     z_scale(0.0),
+     prev_l_handvec(0,0,0),
+     prev_r_handvec(0,0,0), 
+     prev_avatar_depth(0.0),
+     has_prev_avatar_depth(false){}
     
 // ========================
 // Private helper
@@ -37,6 +41,43 @@ Eigen::Vector3d Kinematics::normalize(const Eigen::Vector3d& v) {
     double norm = v.norm();
     if (norm < 1e-12) return Eigen::Vector3d::Zero();
     return v / norm;
+}
+
+//################################################################################################
+//################################################################################################
+//------------------------------------------------------------------------------------------------
+//Estiamte avatar depth based on hip distance
+//------------------------------------------------------------------------------------------------
+//################################################################################################
+//################################################################################################
+double Kinematics::estimate_avatar_depth(std::map<std::string, Eigen::Vector3d>& pose_data, double alpha)
+{
+    auto normalize_to_0_2 = [](double x, double min_val, double max_val) -> double {
+        double normalized = 2.0 * (max_val - x) / (max_val - min_val);
+        // Clamp between 0 and 2
+        if (normalized < 0.0) normalized = 0.0;
+        if (normalized > 2.0) normalized = 2.0;
+        return normalized;
+    };
+
+    // Ensure both hips exist
+    if (pose_data.count("LeftHip") && pose_data.count("RightHip") && pose_data.count("video_width")) {
+        double width = pose_data["video_width"].x();
+
+        Eigen::Vector3d l_hip = pose_data["LeftHip"];
+        Eigen::Vector3d r_hip = pose_data["RightHip"];
+
+        double length = (l_hip - r_hip).norm();
+        double dist = normalize_to_0_2(length, width / 8.0, width / 3.0);
+
+        // Apply exponential smoothing (like Python version)
+        if (has_prev_avatar_depth)
+            prev_avatar_depth = (1.0 - alpha) * prev_avatar_depth + alpha * dist;
+        else
+            prev_avatar_depth = dist;
+    }
+    // Return last known value (or 0 if no data yet)
+    return prev_avatar_depth;
 }
 
 
@@ -141,6 +182,13 @@ Eigen::Quaterniond Kinematics::head_orientation(
     Eigen::Vector3d nose = face_mesh_pts.at("Nose");
     Eigen::Vector3d l_trag = face_mesh_pts.at("LeftEar");
     Eigen::Vector3d r_trag = face_mesh_pts.at("RightEar");
+
+    if (face_mesh_pts.find("NoseTip") != face_mesh_pts.end()) {
+        nose = face_mesh_pts.at("NoseTip");
+        l_trag = face_mesh_pts.at("LeftEarTragus");
+        r_trag = face_mesh_pts.at("RightEarTragus");   
+    }
+
     Eigen::Vector3d head_center = (l_trag + r_trag) / 2.0;
 
     // Local head coordinate frame
@@ -284,27 +332,56 @@ std::pair<Eigen::Quaterniond, Eigen::Quaterniond> Kinematics::left_arm_orientati
             l_arm_upper_quat = torso_quat.inverse()*upper_quat;
         }
 
-        Eigen::Vector3d x_axis = normalize(forearm_vec.cross(torso_z));
-        Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
-        Eigen::Vector3d y_axis = normalize(forearm_vec);
-
         std::optional<Eigen::Vector3d> left_hand_normal_vector = hand_normal_vector(body_pts, "left");
         if (left_hand_normal_vector) {
-            x_axis = normalize(-(*left_hand_normal_vector));
-            z_axis = normalize(x_axis.cross(forearm_vec));
-            y_axis = normalize(forearm_vec);
+            Eigen::Vector3d x_axis = normalize(-(*left_hand_normal_vector));
+            Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
+            Eigen::Vector3d y_axis = normalize(forearm_vec);
             x_axis = normalize((y_axis).cross(z_axis));
+
+            Eigen::Matrix3d rot_matrix;
+            rot_matrix.col(0) = x_axis;
+            rot_matrix.col(1) = y_axis;
+            rot_matrix.col(2) = z_axis;
+
+            lower_quat = Eigen::Quaterniond(rot_matrix);
+            lower_quat.normalize();
+            l_arm_lower_quat = upper_quat.inverse()*lower_quat;
+
+            prev_l_handvec = x_axis;
+        }
+        else if (prev_l_handvec.norm() > 1e-6) {
+            // Use previous hand normal vector to estimate current orientation
+            Eigen::Vector3d x_axis = prev_l_handvec;
+            Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
+            Eigen::Vector3d y_axis = normalize(forearm_vec);
+            x_axis = normalize((y_axis).cross(z_axis));
+
+            Eigen::Matrix3d rot_matrix;
+            rot_matrix.col(0) = x_axis;
+            rot_matrix.col(1) = y_axis;
+            rot_matrix.col(2) = z_axis;
+
+            lower_quat = Eigen::Quaterniond(rot_matrix);
+            lower_quat.normalize();
+            l_arm_lower_quat = upper_quat.inverse()*lower_quat;
+        }
+        else{
+            Eigen::Vector3d x_axis(1.0, 0.0, 0.0);
+            Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
+            Eigen::Vector3d y_axis = normalize(forearm_vec);
+            x_axis = normalize((y_axis).cross(z_axis));
+
+            Eigen::Matrix3d rot_matrix;
+            rot_matrix.col(0) = x_axis;
+            rot_matrix.col(1) = y_axis;
+            rot_matrix.col(2) = z_axis;
+
+            lower_quat = Eigen::Quaterniond(rot_matrix);
+            lower_quat.normalize();
+            l_arm_lower_quat = upper_quat.inverse()*lower_quat;
         }
 
-        Eigen::Matrix3d rot_matrix;
-        rot_matrix.col(0) = x_axis;
-        rot_matrix.col(1) = y_axis;
-        rot_matrix.col(2) = z_axis;
-
-        lower_quat = Eigen::Quaterniond(rot_matrix);
-        lower_quat.normalize();
-
-        l_arm_lower_quat = upper_quat.inverse()*lower_quat;
     }
 
     // ========================
@@ -401,26 +478,55 @@ std::pair<Eigen::Quaterniond, Eigen::Quaterniond> Kinematics::right_arm_orientat
             r_arm_upper_quat = torso_quat.inverse()*upper_quat;
         }
 
-        Eigen::Vector3d x_axis = normalize(forearm_vec.cross(torso_z));
-        Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
-        Eigen::Vector3d y_axis = forearm_vec;
-
         std::optional<Eigen::Vector3d> right_hand_normal_vector = hand_normal_vector(body_pts, "right");
         if (right_hand_normal_vector) {
-            x_axis = normalize(-*right_hand_normal_vector);
-            z_axis = normalize(x_axis.cross(forearm_vec));
-            y_axis = forearm_vec;
+            Eigen::Vector3d x_axis = normalize(-*right_hand_normal_vector);
+            Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
+            Eigen::Vector3d y_axis = forearm_vec;
             x_axis = normalize((y_axis).cross(z_axis));
+
+            Eigen::Matrix3d rot_matrix;
+            rot_matrix.col(0) = x_axis;
+            rot_matrix.col(1) = y_axis;
+            rot_matrix.col(2) = z_axis;
+
+            lower_quat = Eigen::Quaterniond(rot_matrix);
+            lower_quat.normalize();
+            r_arm_lower_quat = upper_quat.inverse()*lower_quat;
+
+            prev_r_handvec = x_axis;
         }
+        else if (prev_r_handvec.norm() > 1e-6) {
+            // Use previous hand normal vector to estimate current orientation
+            Eigen::Vector3d x_axis = prev_r_handvec;
+            Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
+            Eigen::Vector3d y_axis = normalize(forearm_vec);
+            x_axis = normalize((y_axis).cross(z_axis));
 
-        Eigen::Matrix3d rot_matrix;
-        rot_matrix.col(0) = x_axis;
-        rot_matrix.col(1) = y_axis;
-        rot_matrix.col(2) = z_axis;
+            Eigen::Matrix3d rot_matrix;
+            rot_matrix.col(0) = x_axis;
+            rot_matrix.col(1) = y_axis;
+            rot_matrix.col(2) = z_axis;
 
-        lower_quat = Eigen::Quaterniond(rot_matrix);
-        lower_quat.normalize();
-        r_arm_lower_quat = upper_quat.inverse()*lower_quat;
+            lower_quat = Eigen::Quaterniond(rot_matrix);
+            lower_quat.normalize();
+            r_arm_lower_quat = upper_quat.inverse()*lower_quat;
+        }
+        else{
+            Eigen::Vector3d x_axis(1.0, 0.0, 0.0);
+            Eigen::Vector3d z_axis = normalize(x_axis.cross(forearm_vec));
+            Eigen::Vector3d y_axis = normalize(forearm_vec);
+            x_axis = normalize((y_axis).cross(z_axis));
+
+            Eigen::Matrix3d rot_matrix;
+            rot_matrix.col(0) = x_axis;
+            rot_matrix.col(1) = y_axis;
+            rot_matrix.col(2) = z_axis;
+
+            lower_quat = Eigen::Quaterniond(rot_matrix);
+            lower_quat.normalize();
+            r_arm_lower_quat = upper_quat.inverse()*lower_quat;
+        }
     }
 
     // ========================
@@ -479,7 +585,7 @@ void Kinematics::update_z_scale(const std::map<std::string, Eigen::Vector3d>& po
        
         if (head_roll_check < 10 && yaw_check < 30 && pitch_check < 20) {
             z_scale = std::abs(nose.z() - (r_ear.z() + l_ear.z()) / 2.0) / std::abs(r_ear.x() - l_ear.x());
-            std::cout << "Internal Z Scale: " << z_scale << std::endl;
+            //std::cout << "Internal Z Scale: " << z_scale << std::endl;
         }
     }
 
@@ -606,6 +712,8 @@ PoseResults Kinematics::structure_kinematic_output(
     auto r_lower_e = r_lower_q.to_euler(mojo_math::EULER_ALGORITHM::XYZ);
     results.quaternions.push_back(r_lower_q);
     results.eulerAngles.push_back(Eigen::Vector3d(r_lower_e.z, -r_lower_e.x, r_lower_e.y));
+
+    results.rawJson = avatar_json(results.eulerAngles);
 
     return results;
 }

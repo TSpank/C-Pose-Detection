@@ -98,6 +98,7 @@
         "xutility": "cpp",
         "*.inc": "cpp",
         "geometry": "cpp",
-        "dense": "cpp"
+        "dense": "cpp",
+        "core": "cpp"
     }
 }

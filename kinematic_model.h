@@ -16,6 +16,7 @@
 struct PoseResults {
     std::vector<mojo_quaternion::quaternion> quaternions;
     std::vector<Eigen::Vector3d> eulerAngles;
+    nlohmann::json rawJson;
 };
 
 class Kinematics {
@@ -44,6 +45,11 @@ private:
 
     double z_scale;
 
+    double prev_avatar_depth;
+    bool has_prev_avatar_depth;
+
+    Eigen::Vector3d prev_r_handvec;
+    Eigen::Vector3d prev_l_handvec;
 
 public:
     Kinematics();
@@ -56,6 +62,12 @@ public:
     Eigen::Quaterniond r_upper_quat;
     Eigen::Quaterniond r_lower_quat;
 };
+    // ========================
+    // Determine avatar depth
+    // ========================
+    double estimate_avatar_depth(
+    std::map<std::string, Eigen::Vector3d>& pose_data, 
+    double alpha = 0.3);
 
     // ========================
     // Torso orientation

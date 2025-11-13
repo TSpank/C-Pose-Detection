@@ -47,8 +47,8 @@ std::string determine_handedness(const json& hand_pts) {
         if (!hand_pts.contains(name))
             throw std::invalid_argument("Missing landmark: " + name);
         const auto& pt = hand_pts.at(name);
-        return Eigen::Vector3d(-pt.at("y").get<double>(),
-                               pt.at("x").get<double>(),
+        return Eigen::Vector3d(pt.at("x").get<double>(),
+                               pt.at("y").get<double>(),
                                pt.at("z").get<double>());
     };
 
@@ -57,12 +57,12 @@ std::string determine_handedness(const json& hand_pts) {
         return Eigen::Vector3d(-v(1), v(0), v(2));
     };
 
-    Eigen::Vector3d middleFingerTip = transform(vec3("MiddleFingerTip"));
-    Eigen::Vector3d middleFingerBase = transform(vec3("MiddleFingerBase"));
-    Eigen::Vector3d palm_vec = normalize(middleFingerTip - middleFingerBase);
-
+    Eigen::Vector3d thumbTip = transform(vec3("ThumbTip"));
     Eigen::Vector3d palmBase = transform(vec3("PalmBase"));
+    Eigen::Vector3d palm_vec = normalize(thumbTip - palmBase);
+
     Eigen::Vector3d indexFingerBase = transform(vec3("IndexFingerBase"));
+    Eigen::Vector3d middleFingerBase = transform(vec3("MiddleFingerBase"));
 
     // Compute reference vectors
     Eigen::Vector3d dir1 = middleFingerBase - indexFingerBase;
@@ -79,12 +79,24 @@ void extract_pose_data(
     std::map<std::string, Eigen::Vector3d>& pose_data,
     long long& timestamp)
 {
+    // === Determine input type ===
+    std::string inputType = "Camera";
+    if (j.contains("inputType")){
+        inputType = j["inputType"].get<std::string>();
+        //std::cout << "Input type: " << inputType << std::endl;
+    }
+
     // === Extract hands ===
     if (j.contains("handOutput") && j["handOutput"].contains("hands")) {
-        for (auto& [hand_name, landmarks] : j["handOutput"]["hands"].items()) {
-            if (hand_name == "unknown"){
-                std::string hand_name = determine_handedness(landmarks);
+        for (auto& [raw_hand_name, landmarks] : j["handOutput"]["hands"].items()) {
+            // Copy hand name so we can modify it
+            std::string hand_name = raw_hand_name;
+
+            if ((hand_name == "Unknown0")||(hand_name == "Unknown1")) {
+                hand_name = determine_handedness(landmarks);
+                std::cout << "Determined hand as: " << hand_name << std::endl;
             }
+
             for (auto& [landmark_name, coords] : landmarks.items()) {
                 if (coords.contains("x") && coords.contains("y") && coords.contains("z")) {
                     std::string full_name;
@@ -95,11 +107,19 @@ void extract_pose_data(
                     else
                         continue;
 
-                    pose_data[full_name] = Eigen::Vector3d(
+                    if (inputType == "Camera") {
+                        pose_data[full_name] = Eigen::Vector3d(
                         -coords["y"].get<double>(),
                         coords["x"].get<double>(),
-                        coords["z"].get<double>()
-                    );
+                        coords["z"].get<double>());
+                    }
+                    else {
+                        pose_data[full_name] = Eigen::Vector3d(
+                        coords["x"].get<double>(),
+                        coords["y"].get<double>(),
+                        coords["z"].get<double>());
+                    };        
+                    
                 }
             }
         }
@@ -113,18 +133,28 @@ void extract_pose_data(
         // --- Extract timestamp if present ---
         if (poseOutput.contains("timestampMs") && poseOutput["timestampMs"].is_number()) {
             timestamp = poseOutput["timestampMs"].get<long long>();
-            std::cout << "Pose timestamp: " << timestamp << std::endl;
+            //std::cout << "Pose timestamp: " << timestamp << std::endl;
         }
 
         // --- Extract poses ---
         if (poseOutput.contains("poses")) {
             for (auto& [name, coords] : poseOutput["poses"].items()) {
-                if (coords.contains("x") && coords.contains("y") && coords.contains("z")) {
-                    pose_data[name] = Eigen::Vector3d(
+                if (coords.contains("x") && coords.contains("y") && coords.contains("z") && coords.contains("inFrameLikelihood")) {
+                    if (coords["inFrameLikelihood"].get<double>() < 0.5) {
+                        continue; // Skip low likelihood points
+                    };
+                    if (inputType == "Camera") {
+                        pose_data[name] = Eigen::Vector3d(
                         -coords["y"].get<double>(),
                         coords["x"].get<double>(),
-                        coords["z"].get<double>()
-                    );
+                        coords["z"].get<double>());
+                    }
+                    else {
+                        pose_data[name] = Eigen::Vector3d(
+                        coords["x"].get<double>(),
+                        coords["y"].get<double>(),
+                        coords["z"].get<double>());
+                    }; 
                 }
             }
         }
@@ -134,13 +164,27 @@ void extract_pose_data(
     if (j.contains("faceOutput") && j["faceOutput"].contains("faces")) {
         for (auto& [name, coords] : j["faceOutput"]["faces"].items()) {
             if (coords.contains("x") && coords.contains("y") && coords.contains("z")) {
-                pose_data[name] = Eigen::Vector3d(
-                    -coords["y"].get<double>(),
-                    coords["x"].get<double>(),
-                    coords["z"].get<double>()
-                );
+                if (inputType == "Camera") {
+                        pose_data[name] = Eigen::Vector3d(
+                        -coords["y"].get<double>(),
+                        coords["x"].get<double>(),
+                        coords["z"].get<double>());
+                    }
+                    else {
+                        pose_data[name] = Eigen::Vector3d(
+                        coords["x"].get<double>(),
+                        coords["y"].get<double>(),
+                        coords["z"].get<double>());
+                    }; 
             }
         }
+    }
+
+    if (j.contains("videoData") && j["videoData"].contains("height") && j["videoData"].contains("height")) {
+        int width = j["videoData"]["width"].get<int>();
+        int height = j["videoData"]["height"].get<int>();
+        pose_data["video_width"] = Eigen::Vector3d(static_cast<double>(height), 0.0, 0.0);
+        pose_data["video_height"] = Eigen::Vector3d(static_cast<double>(width), 0.0, 0.0);
     }
 }
 
@@ -213,6 +257,8 @@ int main() {
                 std::map<std::string, Eigen::Vector3d> pose_data;
                 // Parse incoming JSON message
                 json json_msg = json::parse(msg->to_string());
+
+                std::cout << json_msg.dump(4) << std::endl;
           
 
                 extract_pose_data(json_msg, pose_data, timestamp);
