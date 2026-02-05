@@ -109,7 +109,7 @@ Eigen::Quaterniond Kinematics::torso_orientation(
     Eigen::Quaterniond quat(1, 0, 0, 0); // identity
 
     std::vector<std::string> keys1 = {"LeftShoulder", "RightShoulder", "LeftHip", "RightHip"};
-    std::vector<std::string> keys2 = {"LeftShoulder", "RightShoulder", "LeftEar", "RightEar"};
+    std::vector<std::string> keys2 = {"LeftShoulder", "RightShoulder"};
 
     bool has_keys1 = std::all_of(keys1.begin(), keys1.end(), [&](const std::string& k){
         return body_pts.find(k) != body_pts.end();
@@ -125,10 +125,10 @@ Eigen::Quaterniond Kinematics::torso_orientation(
         Eigen::Vector3d l_hip      = body_pts.at("LeftHip");
         Eigen::Vector3d r_hip      = body_pts.at("RightHip");
 
-        l_shoulder.z() *= 2;
-        r_shoulder.z() *= 2;  
-        l_hip.z()      *= 2;
-        r_hip.z()      *= 2;
+        l_shoulder.z() *= 0.5;
+        r_shoulder.z() *= 0.5;  
+        l_hip.z()      *= 0.5;
+        r_hip.z()      *= 0.5;
 
         Eigen::Vector3d y_axis = normalize((l_hip + r_hip)/2 - (l_shoulder + r_shoulder)/2);
         Eigen::Vector3d x_axis = normalize(l_shoulder - r_shoulder);
@@ -147,20 +147,13 @@ Eigen::Quaterniond Kinematics::torso_orientation(
         // Shoulder and chest center
         Eigen::Vector3d l_shoulder = body_pts.at("LeftShoulder");
         Eigen::Vector3d r_shoulder = body_pts.at("RightShoulder");
-        Eigen::Vector3d chest_center = 0.5 * (l_shoulder + r_shoulder);
-
-        // Head and depth
-        Eigen::Vector3d l_ear = body_pts.at("LeftEar");
-        Eigen::Vector3d r_ear = body_pts.at("RightEar");
-        Eigen::Vector3d head_center = 0.5 * (l_ear + r_ear);
-        double head_depth = 0.5 * (r_ear - l_ear).norm();
-
+        l_shoulder.z() *= 0.5;
+        r_shoulder.z() *= 0.5;
+        
         // Temporary up direction
         Eigen::Vector3d temp_up(0, 1, 0);  // could also use hips if available
         Eigen::Vector3d x_axis = normalize((l_shoulder - r_shoulder));
-        Eigen::Vector3d back_dir = normalize(x_axis.cross(temp_up));
-        Eigen::Vector3d back_head = head_center + back_dir * head_depth;
-        Eigen::Vector3d y_axis = normalize((chest_center - back_head));
+        Eigen::Vector3d y_axis = normalize(temp_up);
         Eigen::Vector3d z_axis = normalize(x_axis.cross(y_axis));
         y_axis = normalize(z_axis.cross(x_axis));
 
@@ -245,9 +238,9 @@ Eigen::Quaterniond Kinematics::head_orientation(
         Eigen::Vector3d l_trag = body_pts.at("LeftEar");
         Eigen::Vector3d r_trag = body_pts.at("RightEar");
 
-        nose.z()   *= 0.5;
-        l_trag.z() *= 0.5;
-        r_trag.z() *= 0.5;
+        nose.z()   *= 0.3;
+        l_trag.z() *= 0.3;
+        r_trag.z() *= 0.3;
 
         Eigen::Vector3d head_center = (l_trag + r_trag) / 2.0;
 

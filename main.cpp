@@ -20,7 +20,7 @@ namespace mqtt {
 // MQTT configuration constants...
 const std::string SUB_SERVER_ADDRESS("tcp://207.154.244.181:1883");
 const std::string SUB_CLIENT_ID("listener_client");
-const std::string SUB_TOPIC("mojo_pose_lm/ten/1/t/#");
+const std::string SUB_TOPIC("mojo_pose_lm/ten/1/t/1/p/1276/#");
 const std::string SUB_USERNAME("scope_mosquitto");
 const std::string SUB_PASSWORD("dektzOWb3pmI");
 
@@ -158,6 +158,7 @@ void extract_pose_data(
                     if (coords["inFrameLikelihood"].get<double>() < 0.8) {
                         continue; // Skip low likelihood points
                     }
+
                     else {
                         // Point is valid → add and filter it
                         Eigen::Vector3d pt(
