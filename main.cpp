@@ -48,45 +48,12 @@ struct VideoInfo {
     int height = 0;
 };
 
-VideoInfo extract_video_info_once(const json& j)
-{
-    static bool hasRun = false;
-    static VideoInfo info;   // static so it persists after returning
-
-    if (hasRun)
-        return info;         // return the same struct every time
-
-    hasRun = true;
-    // --- Input Type ---
-    if (j.contains("inputType") && j["inputType"].is_string())
-        info.inputType = j["inputType"];
-    else
-        info.inputType = "Camera";
-
-    // --- Video Dimensions ---
-    if (j.contains("videoData") &&
-        j["videoData"].contains("width") &&
-        j["videoData"].contains("height"))
-    {
-        info.width  = j["videoData"]["width"].get<int>();
-        info.height = j["videoData"]["height"].get<int>();
-        info.valid = true;
-    }
-
-    return info;
-}
-
 
 void extract_pose_data(
     const json& json_data,
-    std::map<std::string, Eigen::Vector3d>& pose_data,
-    long long& timestamp,
-    const VideoInfo vid)
+    std::map<std::string, Eigen::Vector3d>& pose_data)
 {
     static std::unordered_map<std::string, OneEuroFilter> filters;
-    
-    // Clear previous data but keep capacity
-    pose_data.clear();
     
     // Handle landmarks nested structure
     json j;
@@ -94,6 +61,16 @@ void extract_pose_data(
         j = json_data["landmarks"];
     } else {
         j = json_data;
+    }
+
+    long long timestamp = 0;
+    int width;
+    int height;
+        
+    if (j.contains("poseOutput") && j["poseOutput"].contains("timestampMs") && j["poseOutput"]["timestampMs"].is_number()) {
+        timestamp = j["poseOutput"]["timestampMs"].get<long long>();
+        width = j["videoData"]["width"].get<int>();
+        height = j["videoData"]["height"].get<int>();
     }
     
     // === Extract hands ===
@@ -140,8 +117,8 @@ void extract_pose_data(
                 // PIXELS (FILTERED)
                 // ===============================
                 Eigen::Vector3d px_pt(
-                    coords["x"].get<double>() * vid.width,
-                    coords["y"].get<double>() * vid.height,
+                    coords["x"].get<double>() * width,
+                    coords["y"].get<double>() * height,
                     coords["z"].get<double>()
                 );
 
@@ -165,13 +142,6 @@ void extract_pose_data(
     if (j.contains("poseOutput")) {
 
         const auto& poseOutput = j["poseOutput"];
-
-        // --- Extract timestamp if present ---
-        
-        if (poseOutput.contains("timestampMs") && poseOutput["timestampMs"].is_number()) {
-            timestamp = poseOutput["timestampMs"].get<long long>();
-            //std::cout << "Pose timestamp: " << timestamp << std::endl;
-        }
 
         // --- Extract poses ---
         if (poseOutput.contains("poses")) {
@@ -297,9 +267,7 @@ int main() {
 
                 // Parse incoming JSON message (avoid dumping for debug)
                 json json_msg = json::parse(msg->to_string());
-
-                vid = extract_video_info_once(json_msg);
-                extract_pose_data(json_msg, pose_data, timestamp, vid);
+                extract_pose_data(json_msg, pose_data);
 
                 auto kinematic_output = kinematics.process_kinematics(pose_data);
                 auto angles_map_plane = kinematics.json_isolated_angles(kinematic_output.quaternions,kinematic_output.eulerAngles);
