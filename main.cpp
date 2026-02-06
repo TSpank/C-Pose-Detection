@@ -99,41 +99,64 @@ void extract_pose_data(
     // === Extract hands ===
     if (j.contains("handOutput") && j["handOutput"].contains("hands")) {
         for (auto& [raw_hand_name, landmarks] : j["handOutput"]["hands"].items()) {
-            // Copy hand name so we can modify it
+
             std::string hand_name = raw_hand_name;
 
             for (auto& [landmark_name, coords] : landmarks.items()) {
-                if (coords.contains("x") && coords.contains("y") && coords.contains("z")) {
-                    std::string full_name;
-                    if (hand_name == "Right")
-                        full_name = "right" + landmark_name;
-                    else if (hand_name == "Left")
-                        full_name = "left" + landmark_name;
-                    else
-                        continue;
+                if (!coords.contains("x") || !coords.contains("y") || !coords.contains("z"))
+                    continue;
 
-                    pose_data[full_name] = Eigen::Vector3d(
+                std::string full_name;
+                if (hand_name == "Right")
+                    full_name = "right" + landmark_name;
+                else if (hand_name == "Left")
+                    full_name = "left" + landmark_name;
+                else
+                    continue;
+
+                // ===============================
+                // NORMALIZED (FILTERED)
+                // ===============================
+                Eigen::Vector3d norm_pt(
                     coords["x"].get<double>(),
                     coords["y"].get<double>(),
-                    coords["z"].get<double>());
+                    coords["z"].get<double>()
+                );
 
-                    pose_data[full_name+"_pixels"] = Eigen::Vector3d(
-                    coords["x"].get<double>()*vid.width,
-                    coords["y"].get<double>()*vid.height,
-                    coords["z"].get<double>());
+                const std::string norm_filter_key = full_name + "_norm";
 
-                    if (landmark_name == "Wrist") {
-                        // Optimize filter lookup
-                        const std::string filter_key = full_name+"_pixels";
-                        auto filter_it = filters.find(filter_key);
-                        if (filter_it == filters.end()) {
-                            filter_it = filters.insert({filter_key, OneEuroFilter(30.0, 0.01, 0.001, 1.0)}).first;
-                        }
-                        // Apply filter using iterator to avoid second lookup
-                        pose_data[full_name+"_pixels"] = filter_it->second(pose_data[full_name+"_pixels"], static_cast<double>(timestamp));
-                    }
-                          
+                auto norm_filter_it = filters.find(norm_filter_key);
+                if (norm_filter_it == filters.end()) {
+                    norm_filter_it = filters.insert({
+                        norm_filter_key,
+                        OneEuroFilter(30.0, 0.01, 0.001, 1.0)
+                    }).first;
                 }
+
+                pose_data[full_name] =
+                    norm_filter_it->second(norm_pt, static_cast<double>(timestamp));
+
+                // ===============================
+                // PIXELS (FILTERED)
+                // ===============================
+                Eigen::Vector3d px_pt(
+                    coords["x"].get<double>() * vid.width,
+                    coords["y"].get<double>() * vid.height,
+                    coords["z"].get<double>()
+                );
+
+                const std::string px_filter_key = full_name + "_pixels";
+
+                auto px_filter_it = filters.find(px_filter_key);
+                if (px_filter_it == filters.end()) {
+                    px_filter_it = filters.insert({
+                        px_filter_key,
+                        OneEuroFilter(30.0, 0.01, 0.001, 1.0)
+                    }).first;
+                }
+
+                pose_data[px_filter_key] =
+                    px_filter_it->second(px_pt, static_cast<double>(timestamp));
             }
         }
     }

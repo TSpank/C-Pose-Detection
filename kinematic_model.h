@@ -56,11 +56,17 @@ private:
     double z_scale;
     double z_scale_mesh;
 
-    double prev_avatar_depth;
-    bool has_prev_avatar_depth;
+    //items for good plan angles
+    bool right_hand_state_;
+    bool left_hand_state_;
 
-    Eigen::Vector3d prev_r_handvec;
-    Eigen::Vector3d prev_l_handvec;
+    double prev_l_hand_rot_;
+    double prev_l_hand_rot_g_;
+    double prev_r_hand_rot_;
+    double prev_r_hand_rot_g_;
+
+    bool right_arm_aligned_;
+    bool left_arm_aligned_;
 
 public:
     Kinematics();
@@ -75,12 +81,6 @@ public:
     Eigen::Quaterniond r_lower_quat_g;
     Eigen::Quaterniond l_lower_quat_g;
 };
-    // ========================
-    // Determine avatar depth
-    // ========================
-    double estimate_avatar_depth(
-    std::map<std::string, Eigen::Vector3d>& pose_data, 
-    double alpha = 0.3);
 
     // ========================
     // Torso orientation

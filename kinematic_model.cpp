@@ -33,11 +33,18 @@ Kinematics::Kinematics()
 
      z_scale(4.0),
      z_scale_mesh(0.7),
-     prev_l_handvec(0,0,0),
-     prev_r_handvec(0,0,0), 
 
-     prev_avatar_depth(0.0),
-     has_prev_avatar_depth(false){}
+     right_hand_state_(false),
+     left_hand_state_(false),
+
+     prev_l_hand_rot_(M_PI / 2.0),
+     prev_l_hand_rot_g_(M_PI / 2.0),
+     prev_r_hand_rot_(M_PI / 2.0),
+     prev_r_hand_rot_g_(M_PI / 2.0),
+
+     right_arm_aligned_(false),
+     left_arm_aligned_(false)
+     {}
     
 // ========================
 // Private helper
@@ -54,43 +61,6 @@ Eigen::Vector3d Kinematics::normalize(const Eigen::Vector3d& v) {
 mojo_quaternion::quaternion Kinematics::to_mojo(const Eigen::Quaterniond& q) const {
     // Converts Eigen (w, x, y, z) to mojo_quaternion
     return mojo_quaternion::quaternion(q.w(), q.x(), q.y(), q.z());
-}
-
-//################################################################################################
-//################################################################################################
-//------------------------------------------------------------------------------------------------
-//Estiamte avatar depth based on hip distance
-//------------------------------------------------------------------------------------------------
-//################################################################################################
-//################################################################################################
-double Kinematics::estimate_avatar_depth(std::map<std::string, Eigen::Vector3d>& pose_data, double alpha)
-{
-    auto normalize_to_0_2 = [](double x, double min_val, double max_val) -> double {
-        double normalized = 2.0 * (max_val - x) / (max_val - min_val);
-        // Clamp between 0 and 2
-        if (normalized < 0.0) normalized = 0.0;
-        if (normalized > 2.0) normalized = 2.0;
-        return normalized;
-    };
-
-    // Ensure both hips exist
-    if (pose_data.count("LeftHip") && pose_data.count("RightHip") && pose_data.count("video_width")) {
-        double width = pose_data["video_width"].x();
-
-        Eigen::Vector3d l_hip = pose_data["LeftHip"];
-        Eigen::Vector3d r_hip = pose_data["RightHip"];
-
-        double length = (l_hip - r_hip).norm();
-        double dist = normalize_to_0_2(length, width / 8.0, width / 3.0);
-
-        // Apply exponential smoothing (like Python version)
-        if (has_prev_avatar_depth)
-            prev_avatar_depth = (alpha) * prev_avatar_depth + alpha * dist;
-        else
-            prev_avatar_depth = dist;
-    }
-    // Return last known value (or 0 if no data yet)
-    return prev_avatar_depth;
 }
 
 
@@ -411,6 +381,10 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> Kinematic
                 l1_x_axis = prev_l1_x_axis;
                 l1_z_axis = normalize(l1_x_axis.cross(arm_vec));
                 l1_y_axis = arm_vec;
+                left_arm_aligned_ = true;
+            }
+            else {
+                left_arm_aligned_ = false;
             }
         }
 
@@ -429,15 +403,17 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> Kinematic
         if (left_hand_normal_vector) {
             std::cout << "l2_x_axis: hand normal\n";
             l2_x_axis = normalize(-(*left_hand_normal_vector));
-            prev_l_handvec = l2_x_axis;
+            left_hand_state_ = true;
         }
-        else if (prev_l_handvec.norm() > 1e-6) {
+        else if (l1_x_axis.norm() > 0.1) {
             std::cout << "l2_x_axis: prev fallback\n";
-            l2_x_axis = l1_x_axis;//prev_l_handvec;
+            l2_x_axis = l1_x_axis;
+            left_hand_state_ = false;
         }
         else {
             std::cout << "l2_x_axis: default\n";
             l2_x_axis = Eigen::Vector3d(1.0, 0.0, 0.0);
+            left_hand_state_ = false;
         }
 
         Eigen::Vector3d l2_z_axis = normalize(l2_x_axis.cross(forearm_vec));
@@ -605,6 +581,10 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> Kinematic
                 r1_x_axis = prev_r1_x_axis;
                 r1_z_axis = normalize(r1_x_axis.cross(arm_vec));
                 r1_y_axis = arm_vec;
+                right_arm_aligned_ = true;
+            }
+            else {
+                right_arm_aligned_ = false;
             }
         }
 
@@ -626,15 +606,17 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> Kinematic
         Eigen::Vector3d r2_x_axis;
         if (right_hand_normal_vector) {
             r2_x_axis = normalize(-(*right_hand_normal_vector));
-            prev_r_handvec = r2_x_axis;
+            right_hand_state_ = true;
             //std::cout << "r2_x_axis: hand normal\n";
         }
-        else if (prev_r_handvec.norm() > 1e-6) {
+        else if (r1_x_axis.norm() > 0.1) {
             r2_x_axis = r1_x_axis;//prev_r_handvec;
+            right_hand_state_ = false;
             //std::cout << "r2_x_axis: prev fallback\n";
         }
         else {
             r2_x_axis = Eigen::Vector3d(1.0, 0.0, 0.0);
+            right_hand_state_ = false;
             //std::cout << "r2_x_axis: default\n";
         }
 
@@ -974,10 +956,6 @@ Kinematics::json_isolated_angles(
     json["theta_torso_roll_r"]  = 0.0;
     json["theta_torso_bend_r"]  = 0.0;
 
-    json["theta_head_pitch_h"] = euler_angles[1].x();
-    json["theta_head_roll_h"]  = euler_angles[1].y();
-    json["theta_head_yaw_h"]   = euler_angles[1].z();
-
     // -------------------------
     // Helper: convert mojo -> Eigen
     // -------------------------
@@ -988,8 +966,9 @@ Kinematics::json_isolated_angles(
     };
 
     // -------------------------
-    // Arm quaternions
+    // quaternions
     // -------------------------
+    Eigen::Quaterniond head_q = to_eigen(quaternions[1]);
     Eigen::Quaterniond l_upper = to_eigen(quaternions[2]);
     Eigen::Quaterniond l_lower = to_eigen(quaternions[3]);
     Eigen::Quaterniond l_lower_g = to_eigen(quaternions[4]);
@@ -997,10 +976,55 @@ Kinematics::json_isolated_angles(
     Eigen::Quaterniond r_lower = to_eigen(quaternions[6]);
     Eigen::Quaterniond r_lower_g = to_eigen(quaternions[7]);
 
-    Eigen::Vector3d torso_forward = Eigen::Vector3d(0, 0, 1);
+    // -------------------------
+    // Head
+    // -------------------------
 
+    // Local head axes
+    Eigen::Vector3d head_forward_local(0, 0, 1);
+    Eigen::Vector3d head_up_local(0, 1, 0);
+
+    // Rotate to world space
+    Eigen::Vector3d head_forward = head_q * head_forward_local;
+    Eigen::Vector3d head_up      = head_q * head_up_local;
+
+    // Unit vectors for axes
+    Eigen::Vector3d X(1, 0, 0);
+    Eigen::Vector3d Y(0, 1, 0);
+    Eigen::Vector3d Z(0, 0, 1);
+
+    const double eps = 1e-8;
+    // --- YAW: forward projected onto XZ plane
+    Eigen::Vector3d head_fwd_xz = head_forward - head_forward.dot(Y) * Y;
+    head_fwd_xz.normalize(); // Eigen handles small norm automatically
+
+    double theta_head_yaw = std::atan2(head_fwd_xz.dot(X),
+                                       head_fwd_xz.dot(Z));
+
+    // --- PITCH: forward projected onto YZ plane
+    Eigen::Vector3d head_fwd_yz = head_forward - head_forward.dot(X) * X;
+    head_fwd_yz.normalize();
+
+    double theta_head_pitch = std::atan2(-head_fwd_yz.dot(Y),
+                                         head_fwd_yz.dot(Z));
+
+    // --- ROLL: up vector projected onto XY plane
+    Eigen::Vector3d head_up_xy = head_up - head_up.dot(Z) * Z;
+    head_up_xy.normalize();
+
+    double theta_head_roll = std::atan2(head_up_xy.dot(X),
+                                        head_up_xy.dot(Y));
+
+    // Assign to "JSON" map
+    json["theta_head_pitch_h"] = theta_head_pitch;
+    json["theta_head_yaw_h"]   = theta_head_yaw;
+    json["theta_head_roll_h"]  = theta_head_roll * 1.2;
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    Eigen::Vector3d torso_forward = Eigen::Vector3d(0, 0, 1);
     Eigen::Vector3d arm_axis_local(0, 1, 0);   // +Y along the arm
-    Eigen::Vector3d arm_forward_local(1, 0, 0); // along forearm for rotation
+    Eigen::Vector3d arm_forward_local(1, 0, 0); // along forearm for rotatio
 
     // -------------------------
     // LEFT SHOULDER
@@ -1020,7 +1044,7 @@ Kinematics::json_isolated_angles(
     // Horizontal rotation (around Y)
     Eigen::Vector3d arm_horiz_l(arm_dir_l.x(), 0, arm_dir_l.z());
     arm_horiz_l.normalize();
-    double theta_yaw_l = std::atan2(arm_horiz_l.z(), -arm_horiz_l.x());
+    double theta_yaw_l = std::atan2(-arm_horiz_l.z(), -arm_horiz_l.x());
 
     // Internal/External rotation
     Eigen::Vector3d arm_forward_l = l_upper * arm_forward_local;
@@ -1031,9 +1055,17 @@ Kinematics::json_isolated_angles(
         torso_forward.dot(arm_proj_l)
     );
 
-    json["theta_armleft_upper_alpha"] = theta_flex_l;
-    json["theta_armleft_upper_beta"]  = theta_abduct_l;
-    json["theta_armleft_upper_gamma"] = theta_rot_l;
+    if (right_arm_aligned_) {
+        theta_rot_l = NAN;
+    } 
+
+    if (std::abs(arm_dir_l.y()) >= 0.85) {
+        theta_yaw_l = NAN;
+    }
+
+    json["theta_armleft_upper_flexion"] = -theta_flex_l;
+    json["theta_armleft_upper_abduction"]  = theta_abduct_l;
+    json["theta_armleft_upper_rotation"] = theta_rot_l;
     json["theta_armleft_upper_yaw"]   = theta_yaw_l;
 
     // -------------------------
@@ -1055,7 +1087,7 @@ Kinematics::json_isolated_angles(
     // Horizontal rotation
     Eigen::Vector3d arm_horiz_r(arm_dir_r.x(), 0, arm_dir_r.z());
     arm_horiz_r.normalize();
-    double theta_yaw_r = std::atan2(arm_horiz_r.z(), arm_horiz_r.x());
+    double theta_yaw_r = std::atan2(-arm_horiz_r.z(), arm_horiz_r.x());
 
     // Internal/External rotation
     Eigen::Vector3d arm_forward_r = r_upper * arm_forward_r_local;
@@ -1066,9 +1098,17 @@ Kinematics::json_isolated_angles(
         torso_forward.dot(arm_proj_r)
     );
 
-    json["theta_armright_upper_alpha"] = theta_flex_r;
-    json["theta_armright_upper_beta"]  = theta_abduct_r;
-    json["theta_armright_upper_gamma"] = -theta_rot_r; // match Python
+    if (left_arm_aligned_) {
+        theta_rot_r = NAN;
+    } 
+
+    if (std::abs(arm_dir_r.y()) >= 0.85) {
+        theta_yaw_r = NAN;
+    }
+
+    json["theta_armright_upper_flexion"] = -theta_flex_r;
+    json["theta_armright_upper_abduction"]  = theta_abduct_r;
+    json["theta_armright_upper_rotation"] = -theta_rot_r; // match Python
     json["theta_armright_upper_yaw"]   = theta_yaw_r;
 
     // -------------------------
@@ -1084,16 +1124,24 @@ Kinematics::json_isolated_angles(
     Eigen::Vector3d palm_l = l_lower * Eigen::Vector3d(-1, 0, 0);
     palm_l.z() = 0; // project onto torso frontal plane
     palm_l.normalize();
-    double theta_pronation_l = std::atan2(palm_l.x(), palm_l.y());
+    double theta_pronation_l = std::atan2(-palm_l.x(), -palm_l.y());
 
     Eigen::Vector3d palm_l_g = l_lower_g * Eigen::Vector3d(-1, 0, 0);
     palm_l_g.z() = 0;
     palm_l_g.normalize();
-    double theta_pronation_l_g = std::atan2(palm_l_g.x(), palm_l_g.y());
+    double theta_pronation_l_g = std::atan2(-palm_l_g.x(), -palm_l_g.y());
 
-    json["theta_armleft_lower_beta"]  = theta_elbow_flex_l;
-    json["theta_armleft_lower_gamma"] = -theta_pronation_l;
-    json["theta_armleft_lower_gamma_g"] = -theta_pronation_l_g;
+    json["theta_armleft_lower_flexion"]  = theta_elbow_flex_l;
+    if (right_hand_state_) {  // left hand active
+        json["theta_armleft_lower_rotation"]   = theta_pronation_l;
+        json["theta_armleft_lower_rotation_g"] = theta_pronation_l_g;
+
+        prev_l_hand_rot_   = theta_pronation_l;
+        prev_l_hand_rot_g_ = theta_pronation_l_g;
+    } else {
+        json["theta_armleft_lower_rotation"]   = prev_l_hand_rot_;
+        json["theta_armleft_lower_rotation_g"] = prev_l_hand_rot_g_;
+    }
 
     // -------------------------
     // RIGHT ELBOW
@@ -1114,9 +1162,17 @@ Kinematics::json_isolated_angles(
     palm_r_g.normalize();
     double theta_pronation_r_g = std::atan2(palm_r_g.x(), palm_r_g.y());
 
-    json["theta_armright_lower_beta"]  = theta_elbow_flex_r;
-    json["theta_armright_lower_gamma"] = theta_pronation_r;
-    json["theta_armright_lower_gamma_g"] = theta_pronation_r_g;
+    json["theta_armright_lower_flexion"]  = theta_elbow_flex_r;
+
+    if (left_hand_state_) {
+        json["theta_armright_lower_rotation"]   = theta_pronation_r;
+        json["theta_armright_lower_rotation_g"] = theta_pronation_r_g;
+        prev_r_hand_rot_   = theta_pronation_r;
+        prev_r_hand_rot_g_ = theta_pronation_r_g;
+    } else {
+        json["theta_armright_lower_rotation"]   = prev_r_hand_rot_;
+        json["theta_armright_lower_rotation_g"] = prev_r_hand_rot_g_;
+    }
 
     return json;
 }
