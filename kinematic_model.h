@@ -9,6 +9,7 @@
 #include <utility> 
 #include <nlohmann/json.hpp>
 #include "MojoQuaternion.hpp"
+#include "PoseData.h"
 
 // -------------------------------------------------------------
 // Struct to hold both quaternions and Euler angles for all poses
@@ -22,15 +23,46 @@ struct PoseResults {
 
 class Kinematics {
 private:
-    // Private helper: normalize a vector
+    // ===========================
+    // Configuration Constants
+    // ===========================
+    static constexpr double DEFAULT_ALPHA = 0.3;
+    static constexpr double Z_SCALE_SHOULDER = 0.5;
+    static constexpr double Z_SCALE_HEAD = 0.3;
+    static constexpr double Z_SCALE_MESH_FACTOR = 0.7;
+    static constexpr double ARM_ALIGNMENT_THRESHOLD = 0.8;
+    static constexpr double LEG_ALIGNMENT_THRESHOLD = 0.7;
+    static constexpr double MAX_PALM_JUMP_PIXELS = 20.0;
+    static constexpr double TORSO_ANGLE_THRESHOLD_DEG = 30.0;
+    static constexpr double HEAD_STRAIGHTNESS_THRESHOLD = 0.052;
+    static constexpr double ARM_VERTICAL_THRESHOLD = 0.85;
+    static constexpr double NORM_EPSILON = 1e-12;
+
+    // ===========================
+    // Private Helpers
+    // ===========================
+    // Normalize a vector
     static Eigen::Vector3d normalize(const Eigen::Vector3d& v);
 
-    // Private helper: convert Eigen quaternion to mojo_quaternion
+    // Convert Eigen quaternion to mojo_quaternion
     mojo_quaternion::quaternion to_mojo(const Eigen::Quaterniond& q) const;
+    
+    // Flip quaternion if needed to ensure shortest path interpolation
+    static void flip_if_needed(const Eigen::Quaterniond& prev, Eigen::Quaterniond& current);
+    
+    // Apply SLERP smoothing with automatic flipping
+    static Eigen::Quaterniond apply_slerp(
+        const Eigen::Quaterniond& prev,
+        const Eigen::Quaterniond& current,
+        double alpha
+    );
 
     //Previous qauts for slerp
     Eigen::Quaterniond prev_torso_quat_;  // stores last torso quaternion
-    bool has_prev_torso_quat_;     
+    bool has_prev_torso_quat_;
+
+    Eigen::Quaterniond prev_hip_quat_;    // stores last hip quaternion
+    bool has_prev_hip_quat_;
 
     Eigen::Quaterniond prev_head_quat_;  // stores last head quaternion
     bool has_prev_head_quat_;
@@ -53,6 +85,12 @@ private:
     Eigen::Quaterniond prev_r2_quat_g_;  // stores r2 quaternion g
     bool has_prev_r2_quat_g_;   
 
+    Eigen::Quaterniond prev_l_hand_quat_;  // stores left hand quaternion
+    bool has_prev_l_hand_quat_;
+
+    Eigen::Quaterniond prev_r_hand_quat_;  // stores right hand quaternion
+    bool has_prev_r_hand_quat_;
+
     double z_scale;
     double z_scale_mesh;
 
@@ -68,8 +106,36 @@ private:
     bool right_arm_aligned_;
     bool left_arm_aligned_;
 
+    // Leg tracking variables
+    Eigen::Quaterniond prev_r_leg_upper_quat_;
+    bool has_prev_r_leg_upper_quat_;
+    Eigen::Quaterniond prev_r_leg_lower_quat_;
+    bool has_prev_r_leg_lower_quat_;
+    Eigen::Quaterniond prev_r_foot_quat_;
+    bool has_prev_r_foot_quat_;
+    
+    Eigen::Quaterniond prev_l_leg_upper_quat_;
+    bool has_prev_l_leg_upper_quat_;
+    Eigen::Quaterniond prev_l_leg_lower_quat_;
+    bool has_prev_l_leg_lower_quat_;
+    Eigen::Quaterniond prev_l_foot_quat_;
+    bool has_prev_l_foot_quat_;
+    
+    bool right_leg_aligned_;
+    bool left_leg_aligned_;
+
 public:
+    // ===========================
+    // Coordinate System:
+    // X-axis: Left to Right (left shoulder to right shoulder)
+    // Y-axis: Down to Up (hips to shoulders)
+    // Z-axis: Back to Front (away from body)
+    // ===========================
+    
     Kinematics();
+    
+    // Reset all state (useful when switching subjects or restarting tracking)
+    void reset();
 
     struct KinematicResults {
     Eigen::Quaterniond torso_quat;
@@ -86,7 +152,15 @@ public:
     // Torso orientation
     // ========================
     Eigen::Quaterniond torso_orientation(
-    const std::map<std::string, Eigen::Vector3d>& body_pts,
+    const PoseData& pose,
+    double alpha = 0.3
+);
+
+    // ========================
+    // Hip orientation
+    // ========================
+    Eigen::Quaterniond hip_orientation(
+    const PoseData& pose,
     double alpha = 0.3
 );
 
@@ -94,7 +168,7 @@ public:
     // Head orientation
     // ========================
     Eigen::Quaterniond head_orientation(
-    const std::map<std::string, Eigen::Vector3d>& face_mesh_pts,
+    const PoseData& pose,
     const Eigen::Quaterniond& torso_quat,
     double alpha = 0.3
 );
@@ -102,8 +176,8 @@ public:
     // ========================
     // Left Arm orientation
     // ========================
-    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> left_arm_orientation(
-    const std::map<std::string, Eigen::Vector3d>& body_pts,
+    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> left_arm_orientation(
+    const PoseData& pose,
     const Eigen::Quaterniond& torso_quat,
     double alpha = 0.3
 );
@@ -111,30 +185,65 @@ public:
     // ========================
     // Right Arm orientation
     // ========================
-    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> right_arm_orientation(
-    const std::map<std::string, Eigen::Vector3d>& body_pts,
+    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> right_arm_orientation(
+    const PoseData& pose,
     const Eigen::Quaterniond& torso_quat,
     double alpha = 0.3
+);
+
+    // ========================
+    // Right Leg orientation  
+    // ========================
+    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> right_leg_orientation(
+    const PoseData& pose,
+    const Eigen::Quaterniond& hip_quat,
+    double alpha = 0.3
+);
+
+    // ========================
+    // Left Leg orientation
+    // ========================
+    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> left_leg_orientation(
+    const PoseData& pose,
+    const Eigen::Quaterniond& hip_quat,
+    double alpha = 0.3
+);
+
+    // ========================
+    // Hand normal vector
+    // ========================
+    std::pair<std::optional<Eigen::Vector3d>, Eigen::Quaterniond> hand_normal_vector(
+    const PoseData& pose,
+    bool is_left
 );
 
     // ========================
     // Neck kinematics
     // ========================
     PoseResults process_kinematics(
-        const std::map<std::string, Eigen::Vector3d>& pose_data);
+        const PoseData& pose_data);
     
     // ================================
     // Strucuture kinematic output
     // ================================
     PoseResults structure_kinematic_output(
         const Eigen::Quaterniond& torso_quat,
+        const Eigen::Quaterniond& hip_quat,
         const Eigen::Quaterniond& head_quat,
         const Eigen::Quaterniond& l_upper_quat,
         const Eigen::Quaterniond& l_lower_quat,
+        const Eigen::Quaterniond& l_hand_quat,
         const Eigen::Quaterniond& r_upper_quat,
         const Eigen::Quaterniond& r_lower_quat,
+        const Eigen::Quaterniond& r_hand_quat,
         const Eigen::Quaterniond& r_lower_quat_g,
-        const Eigen::Quaterniond& l_lower_quat_g);
+        const Eigen::Quaterniond& l_lower_quat_g,
+        const Eigen::Quaterniond& l_leg_upper_quat,
+        const Eigen::Quaterniond& l_leg_lower_quat,
+        const Eigen::Quaterniond& l_foot_quat,
+        const Eigen::Quaterniond& r_leg_upper_quat,
+        const Eigen::Quaterniond& r_leg_lower_quat,
+        const Eigen::Quaterniond& r_foot_quat);
 
     // ================================
     // JSON Conversion Helper
@@ -152,8 +261,8 @@ public:
          std::vector<Eigen::Vector3d>& euler_angles);
 
     // Z scaling helpers
-    void update_z_scale(const std::map<std::string, Eigen::Vector3d>& pose_data);
-    std::map<std::string, Eigen::Vector3d> normalize_z_data(const std::map<std::string, Eigen::Vector3d>& pose_data);
+    void update_z_scale(const PoseData& pose_data);
+    PoseData normalize_z_data(const PoseData& pose_data);
 
     // Not for app
     // Header

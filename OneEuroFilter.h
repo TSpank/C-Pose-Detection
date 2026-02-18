@@ -4,6 +4,9 @@
 
 class OneEuroFilter {
 public:
+    // Default constructor for array initialization
+    OneEuroFilter() : OneEuroFilter(30.0, 0.01, 0.001, 1.0) {}
+    
     OneEuroFilter(double freq, double min_cutoff = 1.0, double beta = 0.0, double d_cutoff = 1.0);
 
     Eigen::Vector3d operator()(const Eigen::Vector3d& x, double timestamp_ms);

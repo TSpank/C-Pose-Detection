@@ -3,12 +3,15 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <memory>
+#include <array>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 
 #include "kinematic_model.h"
 #include "mqttStickman.h"
 #include "OneEuroFilter.h"
+#include "PoseData.h"
 
 using json = nlohmann::json;
 
@@ -26,7 +29,7 @@ const std::string SUB_PASSWORD("dektzOWb3pmI");
 
 const std::string PUB_SERVER_ADDRESS("tcp://207.154.244.181:1883");
 const std::string PUB_CLIENT_ID("publisher_client");
-const std::string PUB_TOPIC("mojo/iOS/thomas");
+const std::string PUB_TOPIC("mojo/iOS/thomasavatar");
 const std::string PUB_USERNAME("scope_mosquitto");
 const std::string PUB_PASSWORD("dektzOWb3pmI");
 
@@ -35,157 +38,157 @@ const std::string PUB_CLIENT_ID_python("publisher_client");
 const std::string PUB_TOPIC_python("mojo/iOS/1234");
 const std::string PUB_TOPIC_python_quats("mojo/iOS/quats");
 
-Eigen::Vector3d normalize(const Eigen::Vector3d& v) {
-    double norm = v.norm();
-    if (norm == 0.0) return Eigen::Vector3d::Zero();
-    return v / norm;
-}
-
-struct VideoInfo {
-    bool valid = false;      // True if width/height extracted
-    std::string inputType;   // "Camera" or other
-    int width = 0;
-    int height = 0;
-};
-
-
-void extract_pose_data(
+// ============================================================================
+// FAST extraction: O(1) indexed access, cache-friendly memory layout
+// Uses PoseData struct with enum-indexed array instead of string map
+// ============================================================================
+void extract_pose_data_fast(
     const json& json_data,
-    std::map<std::string, Eigen::Vector3d>& pose_data)
+    PoseData& pose_data)
 {
-    static std::unordered_map<std::string, OneEuroFilter> filters;
+    // Filters stored per-landmark index for O(1) access
+    // Static arrays with default constructor (uses default filter params)
+    static std::array<OneEuroFilter, POSE_LANDMARK_COUNT> filters;
+    static std::array<OneEuroFilter, POSE_LANDMARK_COUNT> pixel_filters;
+    
+    // Clear previous data
+    pose_data.clear();
     
     // Handle landmarks nested structure
-    json j;
+    const json* j = &json_data;
+    json nested;
     if (json_data.contains("landmarks")) {
-        j = json_data["landmarks"];
-    } else {
-        j = json_data;
+        nested = json_data["landmarks"];
+        j = &nested;
     }
 
-    long long timestamp = 0;
-    int width;
-    int height;
-        
-    if (j.contains("poseOutput") && j["poseOutput"].contains("timestampMs") && j["poseOutput"]["timestampMs"].is_number()) {
-        timestamp = j["poseOutput"]["timestampMs"].get<long long>();
-        width = j["videoData"]["width"].get<int>();
-        height = j["videoData"]["height"].get<int>();
+    // Extract timestamp and dimensions
+    if (j->contains("poseOutput") && (*j)["poseOutput"].contains("timestampMs") && 
+        (*j)["poseOutput"]["timestampMs"].is_number()) {
+        pose_data.timestamp_ms = (*j)["poseOutput"]["timestampMs"].get<int64_t>();
+        if (j->contains("videoData")) {
+            pose_data.frame_width = (*j)["videoData"]["width"].get<int32_t>();
+            pose_data.frame_height = (*j)["videoData"]["height"].get<int32_t>();
+        }
     }
     
-    // === Extract hands ===
-    if (j.contains("handOutput") && j["handOutput"].contains("hands")) {
-        for (auto& [raw_hand_name, landmarks] : j["handOutput"]["hands"].items()) {
+    double ts = static_cast<double>(pose_data.timestamp_ms);
 
-            std::string hand_name = raw_hand_name;
+    // === Extract hands ===
+    if (j->contains("handOutput") && (*j)["handOutput"].contains("hands")) {
+        for (auto& [raw_hand_name, landmarks] : (*j)["handOutput"]["hands"].items()) {
+            bool isLeft = (raw_hand_name == "Left");
+            bool isRight = (raw_hand_name == "Right");
+            if (!isLeft && !isRight) continue;
+            
+            const char* prefix = isLeft ? "left" : "right";
 
             for (auto& [landmark_name, coords] : landmarks.items()) {
                 if (!coords.contains("x") || !coords.contains("y") || !coords.contains("z"))
                     continue;
 
-                std::string full_name;
-                if (hand_name == "Right")
-                    full_name = "right" + landmark_name;
-                else if (hand_name == "Left")
-                    full_name = "left" + landmark_name;
-                else
-                    continue;
+                bool found = false;
+                PoseLandmark idx = handLandmarkToEnum(prefix, landmark_name, found);
+                if (!found) continue;
 
-                // ===============================
-                // NORMALIZED (FILTERED)
-                // ===============================
+                size_t i = static_cast<size_t>(idx);
+                
+                // Normalized coordinates (filtered)
                 Eigen::Vector3d norm_pt(
-                    coords["x"].get<double>(),
-                    coords["y"].get<double>(),
-                    coords["z"].get<double>()
+                    coords["x"].get<double>()*pose_data.frame_width,
+                    coords["y"].get<double>()*pose_data.frame_height,
+                    coords["z"].get<double>()*pose_data.frame_width
                 );
-
-                const std::string norm_filter_key = full_name + "_norm";
-
-                auto norm_filter_it = filters.find(norm_filter_key);
-                if (norm_filter_it == filters.end()) {
-                    norm_filter_it = filters.insert({
-                        norm_filter_key,
-                        OneEuroFilter(30.0, 0.01, 0.001, 1.0)
-                    }).first;
-                }
-
-                pose_data[full_name] =
-                    norm_filter_it->second(norm_pt, static_cast<double>(timestamp));
-
-                // ===============================
-                // PIXELS (FILTERED)
-                // ===============================
-                Eigen::Vector3d px_pt(
-                    coords["x"].get<double>() * width,
-                    coords["y"].get<double>() * height,
-                    coords["z"].get<double>()
-                );
-
-                const std::string px_filter_key = full_name + "_pixels";
-
-                auto px_filter_it = filters.find(px_filter_key);
-                if (px_filter_it == filters.end()) {
-                    px_filter_it = filters.insert({
-                        px_filter_key,
-                        OneEuroFilter(30.0, 0.01, 0.001, 1.0)
-                    }).first;
-                }
-
-                pose_data[px_filter_key] =
-                    px_filter_it->second(px_pt, static_cast<double>(timestamp));
+                pose_data.set(idx, norm_pt);
             }
         }
     }
+    // === Extract pose landmarks ===
+    if (j->contains("poseOutput") && (*j)["poseOutput"].contains("poses")) {
+        for (auto& [name, coords] : (*j)["poseOutput"]["poses"].items()) {
+            if (!coords.contains("x") || !coords.contains("y") || 
+                !coords.contains("z") || !coords.contains("inFrameLikelihood"))
+                continue;
 
-    // === Extract pose landmarks and timestamp ===
-    if (j.contains("poseOutput")) {
+            if (coords["inFrameLikelihood"].get<double>() < 0.75)
+                continue;
 
-        const auto& poseOutput = j["poseOutput"];
+            bool found = false;
+            PoseLandmark idx = stringToPoseLandmark(name, found);
+            if (!found) continue;
 
-        // --- Extract poses ---
-        if (poseOutput.contains("poses")) {
-            for (auto& [name, coords] : poseOutput["poses"].items()) {
-                if (coords.contains("x") && coords.contains("y") && coords.contains("z") && coords.contains("inFrameLikelihood")) {
-
-                    if (coords["inFrameLikelihood"].get<double>() < 0.8) {
-                        continue; // Skip low likelihood points
-                    }
-
-                    else {
-                        // Point is valid → add and filter it
-                        Eigen::Vector3d pt(
-                            coords["x"].get<double>(),
-                            coords["y"].get<double>(),
-                            coords["z"].get<double>()
-                        );
-
-                        // Optimize filter lookup
-                        auto filter_it = filters.find(name);
-                        if (filter_it == filters.end()) {
-                            filter_it = filters.insert({name, OneEuroFilter(30.0, 0.01, 0.001, 1.0)}).first;
-                        }
-
-                        // Apply filter using iterator to avoid second lookup
-                        pose_data[name] = filter_it->second(pt, static_cast<double>(timestamp));
-                    } 
-                }
-            }
-        }
-    }
-
-    // === Extract face landmarks ===
-    if (j.contains("faceOutput") && j["faceOutput"].contains("faces")) {
-        for (auto& [name, coords] : j["faceOutput"]["faces"].items()) {
-            if (coords.contains("x") && coords.contains("y") && coords.contains("z")) { 
-                std::string key = "mesh_" + name;
-                pose_data[key] = Eigen::Vector3d(
+            size_t i = static_cast<size_t>(idx);
+            
+            Eigen::Vector3d pt(
                 coords["x"].get<double>(),
                 coords["y"].get<double>(),
-                coords["z"].get<double>());        
-            }
+                coords["z"].get<double>()
+            );
+            
+            pose_data.set(idx, filters[i](pt, ts));
         }
     }
+
+    // === Extract face mesh landmarks ===
+    if (j->contains("faceOutput") && (*j)["faceOutput"].contains("faces")) {
+        for (auto& [name, coords] : (*j)["faceOutput"]["faces"].items()) {
+            if (!coords.contains("x") || !coords.contains("y") || !coords.contains("z"))
+                continue;
+
+            bool found = false;
+            PoseLandmark idx = faceMeshToEnum(name, found);
+            if (!found) continue;
+
+            // Face mesh: no filtering, direct assignment
+            pose_data.set(idx, Eigen::Vector3d(
+                coords["x"].get<double>(),
+                coords["y"].get<double>(),
+                coords["z"].get<double>()
+            ));
+        }
+    }
+}
+
+// ============================================================================
+// Adapter: Convert PoseData to std::map for backward compatibility
+// Use this during transition period, then refactor Kinematics to use PoseData
+// ============================================================================
+std::map<std::string, Eigen::Vector3d> poseDataToMap(const PoseData& pd) {
+    std::map<std::string, Eigen::Vector3d> result;
+    
+    // Body landmarks
+    if (pd.has(PoseLandmark::Nose)) result["Nose"] = pd[PoseLandmark::Nose];
+    if (pd.has(PoseLandmark::LeftEar)) result["LeftEar"] = pd[PoseLandmark::LeftEar];
+    if (pd.has(PoseLandmark::RightEar)) result["RightEar"] = pd[PoseLandmark::RightEar];
+    if (pd.has(PoseLandmark::LeftShoulder)) result["LeftShoulder"] = pd[PoseLandmark::LeftShoulder];
+    if (pd.has(PoseLandmark::RightShoulder)) result["RightShoulder"] = pd[PoseLandmark::RightShoulder];
+    if (pd.has(PoseLandmark::LeftElbow)) result["LeftElbow"] = pd[PoseLandmark::LeftElbow];
+    if (pd.has(PoseLandmark::RightElbow)) result["RightElbow"] = pd[PoseLandmark::RightElbow];
+    if (pd.has(PoseLandmark::LeftWrist)) result["LeftWrist"] = pd[PoseLandmark::LeftWrist];
+    if (pd.has(PoseLandmark::RightWrist)) result["RightWrist"] = pd[PoseLandmark::RightWrist];
+    if (pd.has(PoseLandmark::LeftHip)) result["LeftHip"] = pd[PoseLandmark::LeftHip];
+    if (pd.has(PoseLandmark::RightHip)) result["RightHip"] = pd[PoseLandmark::RightHip];
+    if (pd.has(PoseLandmark::LeftKnee)) result["LeftKnee"] = pd[PoseLandmark::LeftKnee];
+    if (pd.has(PoseLandmark::RightKnee)) result["RightKnee"] = pd[PoseLandmark::RightKnee];
+    if (pd.has(PoseLandmark::LeftAnkle)) result["LeftAnkle"] = pd[PoseLandmark::LeftAnkle];
+    if (pd.has(PoseLandmark::RightAnkle)) result["RightAnkle"] = pd[PoseLandmark::RightAnkle];
+    
+    // Face mesh
+    if (pd.has(PoseLandmark::MeshNoseTip)) result["mesh_NoseTip"] = pd[PoseLandmark::MeshNoseTip];
+    if (pd.has(PoseLandmark::MeshLeftEarTragus)) result["mesh_LeftEarTragus"] = pd[PoseLandmark::MeshLeftEarTragus];
+    if (pd.has(PoseLandmark::MeshRightEarTragus)) result["mesh_RightEarTragus"] = pd[PoseLandmark::MeshRightEarTragus];
+    
+    // Hand landmarks - Left (normalized)
+    if (pd.has(PoseLandmark::LeftPalmBase)) result["leftPalmBase"] = pd[PoseLandmark::LeftPalmBase];
+    if (pd.has(PoseLandmark::RightPalmBase)) result["rightPalmBase"] = pd[PoseLandmark::RightPalmBase];
+    if (pd.has(PoseLandmark::LeftIndexFingerBase)) result["leftIndexFingerBase"] = pd[PoseLandmark::LeftIndexFingerBase];
+    if (pd.has(PoseLandmark::LeftMiddleFingerBase)) result["leftMiddleFingerBase"] = pd[PoseLandmark::LeftMiddleFingerBase];
+    if (pd.has(PoseLandmark::LeftPinkyFingerBase)) result["leftPinkyFingerBase"] = pd[PoseLandmark::LeftPinkyFingerBase];
+    if (pd.has(PoseLandmark::RightIndexFingerBase)) result["rightIndexFingerBase"] = pd[PoseLandmark::RightIndexFingerBase];
+    if (pd.has(PoseLandmark::RightMiddleFingerBase)) result["rightMiddleFingerBase"] = pd[PoseLandmark::RightMiddleFingerBase];
+    if (pd.has(PoseLandmark::RightPinkyFingerBase)) result["rightPinkyFingerBase"] = pd[PoseLandmark::RightPinkyFingerBase];
+
+    return result;
 }
 
 int main() {
@@ -247,29 +250,30 @@ int main() {
 
     // Main loop: receive -> compute -> publish
     auto start = std::chrono::steady_clock::now();
-
-    VideoInfo vid;
     
     // Pre-allocate JSON objects to avoid repeated allocations
     json json_angles;
     json json_angles_plane;
     nlohmann::json payload_angles;
     nlohmann::json payload_angles_plane;
+    
+    // Pre-allocate PoseData struct (reused each frame)
+    PoseData fast_pose_data;
 
     while (std::chrono::steady_clock::now() - start < std::chrono::seconds(1000)) {
         mqtt::const_message_ptr msg(nullptr);
         if (sub_client.try_consume_message(&msg) && msg) {
             try {
-                // === timestamp ===
-                long long timestamp = 0;
-
-                std::map<std::string, Eigen::Vector3d> pose_data;
-
-                // Parse incoming JSON message (avoid dumping for debug)
+                // Parse incoming JSON message
                 json json_msg = json::parse(msg->to_string());
-                extract_pose_data(json_msg, pose_data);
+                
+                // Use fast extraction into indexed struct
+                extract_pose_data_fast(json_msg, fast_pose_data);
+                
+                long long timestamp = fast_pose_data.timestamp_ms;
 
-                auto kinematic_output = kinematics.process_kinematics(pose_data);
+                // Direct PoseData → Kinematics (no conversion overhead!)
+                auto kinematic_output = kinematics.process_kinematics(fast_pose_data);
                 auto angles_map_plane = kinematics.json_isolated_angles(kinematic_output.quaternions,kinematic_output.eulerAngles);
                 auto angles_map = kinematics.avatar_json(kinematic_output.eulerAngles);
 
@@ -279,8 +283,6 @@ int main() {
                 for (const auto& [key, value] : angles_map) {
                     json_angles[key] = value;
                 }
-
-                
 
                 payload_angles.clear();
                 payload_angles["pose"] = json_angles;
@@ -300,6 +302,7 @@ int main() {
 
                 payload_angles_plane.clear();
                 payload_angles_plane["pose"] = json_angles_plane;
+                payload_angles_plane["pose_avatar"] = json_angles;
                 payload_angles_plane["timestamp"] = timestamp; 
                 // // Publish angles as MQTT message
                 auto pubmsg_angles_plane = mqtt::make_message(PUB_TOPIC, payload_angles_plane.dump());
