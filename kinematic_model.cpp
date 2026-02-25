@@ -41,6 +41,8 @@ Kinematics::Kinematics()
      prev_l_leg_lower_quat_(1, 0, 0, 0), has_prev_l_leg_lower_quat_(false),
      prev_l_foot_quat_(1, 0, 0, 0), has_prev_l_foot_quat_(false),
 
+
+
      z_scale(4.0),
      z_scale_mesh(0.7),
 
@@ -55,7 +57,12 @@ Kinematics::Kinematics()
      right_arm_aligned_(false),
      left_arm_aligned_(false),
      right_leg_aligned_(false),
-     left_leg_aligned_(false)
+     left_leg_aligned_(false),
+
+     prev_r_handvec_(0, 0, 0),
+     prev_l_handvec_(0, 0, 0),
+     prev_r_hand_quat_recovery_(1, 0, 0, 0),
+     prev_l_hand_quat_recovery_(1, 0, 0, 0)
      {}
     
 // ========================
@@ -91,133 +98,6 @@ Eigen::Quaterniond Kinematics::apply_slerp(
     Eigen::Quaterniond result = current;
     flip_if_needed(prev, result);
     return prev.slerp(alpha, result);
-}
-
-// Reset all tracking state
-void Kinematics::reset() {
-    has_prev_torso_quat_ = false;
-    has_prev_hip_quat_ = false;
-    has_prev_head_quat_ = false;
-    has_prev_l1_quat_ = false;
-    has_prev_l2_quat_ = false;
-    has_prev_r1_quat_ = false;
-    has_prev_r2_quat_ = false;
-    has_prev_l2_quat_g_ = false;
-    has_prev_r2_quat_g_ = false;
-    has_prev_l_hand_quat_ = false;
-    has_prev_r_hand_quat_ = false;
-    has_prev_r_leg_upper_quat_ = false;
-    has_prev_r_leg_lower_quat_ = false;
-    has_prev_r_foot_quat_ = false;
-    has_prev_l_leg_upper_quat_ = false;
-    has_prev_l_leg_lower_quat_ = false;
-    has_prev_l_foot_quat_ = false;
-    
-    prev_torso_quat_ = Eigen::Quaterniond::Identity();
-    prev_hip_quat_ = Eigen::Quaterniond::Identity();
-    prev_head_quat_ = Eigen::Quaterniond::Identity();
-    prev_l1_quat_ = Eigen::Quaterniond::Identity();
-    prev_l2_quat_ = Eigen::Quaterniond::Identity();
-    prev_r1_quat_ = Eigen::Quaterniond::Identity();
-    prev_r2_quat_ = Eigen::Quaterniond::Identity();
-    prev_l2_quat_g_ = Eigen::Quaterniond::Identity();
-    prev_r2_quat_g_ = Eigen::Quaterniond::Identity();
-    prev_l_hand_quat_ = Eigen::Quaterniond::Identity();
-    prev_r_hand_quat_ = Eigen::Quaterniond::Identity();
-    prev_r_leg_upper_quat_ = Eigen::Quaterniond::Identity();
-    prev_r_leg_lower_quat_ = Eigen::Quaterniond::Identity();
-    prev_r_foot_quat_ = Eigen::Quaterniond::Identity();
-    prev_l_leg_upper_quat_ = Eigen::Quaterniond::Identity();
-    prev_l_leg_lower_quat_ = Eigen::Quaterniond::Identity();
-    prev_l_foot_quat_ = Eigen::Quaterniond::Identity();
-    
-    z_scale = 4.0;
-    z_scale_mesh = 0.7;
-    
-    left_hand_state_ = false;
-    right_hand_state_ = false;
-    left_arm_aligned_ = false;
-    right_arm_aligned_ = false;
-    left_leg_aligned_ = false;
-    right_leg_aligned_ = false;
-    
-    prev_l_hand_rot_ = M_PI / 2.0;
-    prev_l_hand_rot_g_ = M_PI / 2.0;
-    prev_r_hand_rot_ = M_PI / 2.0;
-    prev_r_hand_rot_g_ = M_PI / 2.0;
-}
-
-
-//################################################################################################
-//################################################################################################
-//------------------------------------------------------------------------------------------------
-//Torso orientation
-//------------------------------------------------------------------------------------------------
-//################################################################################################
-//################################################################################################
-Eigen::Quaterniond Kinematics::torso_orientation(
-    const PoseData& pose,
-    double alpha
-)
-{
-    Eigen::Quaterniond quat(1, 0, 0, 0); // identity
-
-    if (pose.hasMinimumBody()) {
-        Eigen::Vector3d l_shoulder = pose[PoseLandmark::LeftShoulder];
-        Eigen::Vector3d r_shoulder = pose[PoseLandmark::RightShoulder];
-        Eigen::Vector3d l_hip      = pose[PoseLandmark::LeftHip];
-        Eigen::Vector3d r_hip      = pose[PoseLandmark::RightHip];
-
-        l_shoulder.z() *= Z_SCALE_SHOULDER;
-        r_shoulder.z() *= Z_SCALE_SHOULDER;  
-        l_hip.z()      *= Z_SCALE_SHOULDER;
-        r_hip.z()      *= Z_SCALE_SHOULDER;
-
-        Eigen::Vector3d y_axis = normalize((l_hip + r_hip)/2 - (l_shoulder + r_shoulder)/2);
-        Eigen::Vector3d x_axis = normalize(l_shoulder - r_shoulder);
-        Eigen::Vector3d z_axis = normalize(x_axis.cross(y_axis));
-        y_axis = normalize(z_axis.cross(x_axis));
-
-        Eigen::Matrix3d rot_matrix;
-        rot_matrix.col(0) = x_axis;
-        rot_matrix.col(1) = y_axis;
-        rot_matrix.col(2) = z_axis;
-
-        quat = Eigen::Quaterniond(rot_matrix);
-    }
-    
-    else if (pose.has(PoseLandmark::LeftShoulder) && pose.has(PoseLandmark::RightShoulder)) {
-        // Shoulder and chest center
-        Eigen::Vector3d l_shoulder = pose[PoseLandmark::LeftShoulder];
-        Eigen::Vector3d r_shoulder = pose[PoseLandmark::RightShoulder];
-        l_shoulder.z() *= Z_SCALE_SHOULDER;
-        r_shoulder.z() *= Z_SCALE_SHOULDER;
-        
-        // Temporary up direction
-        Eigen::Vector3d temp_up(0, 1, 0);  // could also use hips if available
-        Eigen::Vector3d x_axis = normalize((l_shoulder - r_shoulder));
-        Eigen::Vector3d y_axis = normalize(temp_up);
-        Eigen::Vector3d z_axis = normalize(x_axis.cross(y_axis));
-        y_axis = normalize(z_axis.cross(x_axis));
-
-        // Build rotation matrix
-        Eigen::Matrix3d rot_matrix;
-        rot_matrix.col(0) = x_axis;
-        rot_matrix.col(1) = y_axis;
-        rot_matrix.col(2) = z_axis;
-
-        quat = Eigen::Quaterniond(rot_matrix);
-    }
-
-    // Smooth transitions
-    if (has_prev_torso_quat_) {
-        quat = apply_slerp(prev_torso_quat_, quat, alpha);
-    } else {
-        has_prev_torso_quat_ = true;
-    }
-
-    prev_torso_quat_ = quat;
-    return quat;
 }
 
 //Hip orientation
@@ -271,16 +151,93 @@ Eigen::Quaterniond Kinematics::hip_orientation(
 //################################################################################################
 //################################################################################################
 //------------------------------------------------------------------------------------------------
+//Torso orientation
+//------------------------------------------------------------------------------------------------
+//################################################################################################
+//################################################################################################
+Eigen::Quaterniond Kinematics::torso_orientation(
+    const PoseData& pose,
+    const Eigen::Quaterniond& hip_quat,
+    double alpha
+)
+{
+    Eigen::Quaterniond quat(1, 0, 0, 0); // identity
+
+    if (pose.hasMinimumBody()) {
+        Eigen::Vector3d l_shoulder = pose[PoseLandmark::LeftShoulder];
+        Eigen::Vector3d r_shoulder = pose[PoseLandmark::RightShoulder];
+        Eigen::Vector3d l_hip      = pose[PoseLandmark::LeftHip];
+        Eigen::Vector3d r_hip      = pose[PoseLandmark::RightHip];
+
+        l_shoulder.z() *= Z_SCALE_SHOULDER;
+        r_shoulder.z() *= Z_SCALE_SHOULDER;  
+        l_hip.z()      *= Z_SCALE_SHOULDER;
+        r_hip.z()      *= Z_SCALE_SHOULDER;
+
+        Eigen::Vector3d y_axis = normalize((l_hip + r_hip)/2 - (l_shoulder + r_shoulder)/2);
+        Eigen::Vector3d x_axis = normalize(l_shoulder - r_shoulder);
+        Eigen::Vector3d z_axis = normalize(x_axis.cross(y_axis));
+        y_axis = normalize(z_axis.cross(x_axis));
+
+        Eigen::Matrix3d rot_matrix;
+        rot_matrix.col(0) = x_axis;
+        rot_matrix.col(1) = y_axis;
+        rot_matrix.col(2) = z_axis;
+
+        quat = hip_quat.inverse()*Eigen::Quaterniond(rot_matrix);
+    }
+    
+    else if (pose.has(PoseLandmark::LeftShoulder) && pose.has(PoseLandmark::RightShoulder)) {
+        // Shoulder and chest center
+        Eigen::Vector3d l_shoulder = pose[PoseLandmark::LeftShoulder];
+        Eigen::Vector3d r_shoulder = pose[PoseLandmark::RightShoulder];
+        l_shoulder.z() *= Z_SCALE_SHOULDER;
+        r_shoulder.z() *= Z_SCALE_SHOULDER;
+        
+        // Temporary up direction
+        Eigen::Vector3d temp_up(0, 1, 0);  // could also use hips if available
+        Eigen::Vector3d x_axis = normalize((l_shoulder - r_shoulder));
+        Eigen::Vector3d y_axis = normalize(temp_up);
+        Eigen::Vector3d z_axis = normalize(x_axis.cross(y_axis));
+        y_axis = normalize(z_axis.cross(x_axis));
+
+        // Build rotation matrix
+        Eigen::Matrix3d rot_matrix;
+        rot_matrix.col(0) = x_axis;
+        rot_matrix.col(1) = y_axis;
+        rot_matrix.col(2) = z_axis;
+
+        quat = hip_quat.inverse()*Eigen::Quaterniond(rot_matrix);
+    }
+
+    // Smooth transitions
+    if (has_prev_torso_quat_) {
+        quat = apply_slerp(prev_torso_quat_, quat, alpha);
+    } else {
+        has_prev_torso_quat_ = true;
+    }
+
+    prev_torso_quat_ = quat;
+    return quat;
+}
+
+
+
+//################################################################################################
+//################################################################################################
+//------------------------------------------------------------------------------------------------
 //Head orientation
 //------------------------------------------------------------------------------------------------
 //################################################################################################
 //################################################################################################
 Eigen::Quaterniond Kinematics::head_orientation(
     const PoseData& pose,
+    const Eigen::Quaterniond& hip_quat,
     const Eigen::Quaterniond& torso_quat,
     double alpha
 ) {
     Eigen::Quaterniond quat_rel(1, 0, 0, 0); // identity quaternion
+    Eigen::Quaterniond torso_g = hip_quat*torso_quat; // global torso orientation
 
     if (pose.hasFaceMesh()) {
         Eigen::Vector3d nose = pose[PoseLandmark::MeshNoseTip];
@@ -304,7 +261,7 @@ Eigen::Quaterniond Kinematics::head_orientation(
         Eigen::Quaterniond quat(rot_matrix);
 
         // Compute relative rotation w.r.t torso
-        quat_rel = torso_quat.inverse()*quat;
+        quat_rel = torso_g.inverse()*quat;
     }
     else if (pose.hasBasicHead()){
             // Get points
@@ -333,7 +290,7 @@ Eigen::Quaterniond Kinematics::head_orientation(
         Eigen::Quaterniond quat(rot_matrix);
 
         // Compute relative rotation w.r.t torso
-        quat_rel = torso_quat.inverse()*quat;
+        quat_rel = torso_g.inverse()*quat;
     }
 
     // Apply SLERP smoothing
@@ -409,18 +366,21 @@ std::pair<std::optional<Eigen::Vector3d>, Eigen::Quaterniond> Kinematics::hand_n
 
 std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> Kinematics::left_arm_orientation(
     const PoseData& pose,
+    const Eigen::Quaterniond& hip_quat,
     const Eigen::Quaterniond& torso_quat,
     double alpha
 ) {
+    Eigen::Quaterniond torso_g = hip_quat*torso_quat; // global torso orientation
     Eigen::Quaterniond l_arm_upper_quat(1, 0, 0, 0);
     Eigen::Quaterniond l_arm_lower_quat(1, 0, 0, 0);
     Eigen::Quaterniond l_arm_lower_quat_g(1, 0, 0, 0);
     Eigen::Quaterniond l_hand_quat(1, 0, 0, 0);
 
-    Eigen::Matrix3d torso_matrix = torso_quat.toRotationMatrix();
+    Eigen::Matrix3d torso_matrix = torso_g.toRotationMatrix();
     Eigen::Vector3d torso_z = torso_matrix.col(2);
 
     Eigen::Quaterniond upper_quat, lower_quat;
+    bool default_pose = false;
 
     // Upper arm (shoulder to elbow)
     if (pose.has(PoseLandmark::LeftShoulder) && pose.has(PoseLandmark::LeftElbow)) {
@@ -439,7 +399,7 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
 
         upper_quat = Eigen::Quaterniond(l1_rot_matrix);
         upper_quat.normalize();
-        l_arm_upper_quat = torso_quat.inverse()*upper_quat;
+        l_arm_upper_quat = torso_g.inverse()*upper_quat;
     }
 
     // Lower arm (elbow to wrist)
@@ -483,7 +443,7 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
 
          // ---- SINGULARITY HANDLING if previous upper arm exists ----
         if (has_prev_l1_quat_) {
-            Eigen::Quaterniond prev_upper_global = torso_quat * (prev_l1_quat_);
+            Eigen::Quaterniond prev_upper_global = torso_g * (prev_l1_quat_);
             Eigen::Vector3d prev_l1_x_axis = prev_upper_global.toRotationMatrix().col(0);
 
             double elbow_align = arm_vec.dot(forearm_vec);
@@ -505,22 +465,26 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
 
         upper_quat = Eigen::Quaterniond(l1_rot_matrix);
         upper_quat.normalize();
-        l_arm_upper_quat = torso_quat.inverse()*upper_quat;
+        l_arm_upper_quat = torso_g.inverse()*upper_quat;
         
         auto [left_hand_normal_vector, left_hand_quat] = hand_normal_vector(pose, true);
 
         Eigen::Vector3d l2_x_axis;
         if (left_hand_normal_vector) {
             l2_x_axis = normalize((*left_hand_normal_vector)); // Use positive normal vector
+            prev_l_handvec_ = l2_x_axis;
+            prev_l_hand_quat_recovery_ = left_hand_quat;
             left_hand_state_ = true;
         }
-        else if (l1_x_axis.norm() > 0.1) {
-            l2_x_axis = l1_x_axis;
+        else if (prev_l_handvec_.norm() > 0.1) {
+            l2_x_axis = prev_l_handvec_;
+            left_hand_quat = prev_l_hand_quat_recovery_;
             left_hand_state_ = false;
         }
         else {
             l2_x_axis = Eigen::Vector3d(1.0, 0.0, 0.0);
             left_hand_state_ = false;
+            default_pose = true;
         }
 
         Eigen::Vector3d l2_z_axis = normalize(l2_x_axis.cross(forearm_vec));
@@ -535,7 +499,7 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
         lower_quat = Eigen::Quaterniond(l2_rot_matrix);
         lower_quat.normalize();
         l_arm_lower_quat = upper_quat.inverse()*lower_quat;
-        l_arm_lower_quat_g = torso_quat.inverse()*lower_quat;
+        l_arm_lower_quat_g = torso_g.inverse()*lower_quat;
         
         // Calculate hand quaternion relative to lower arm
         l_hand_quat = lower_quat.inverse() * left_hand_quat;
@@ -584,6 +548,10 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
     }
     prev_l_hand_quat_ = l_hand_quat;
 
+    if (default_pose) {
+        l_hand_quat = Eigen::Quaterniond::Identity();
+    }
+
     return {l_arm_upper_quat, l_arm_lower_quat, l_arm_lower_quat_g, l_hand_quat};
 }
 
@@ -597,18 +565,22 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
 //################################################################################################
 std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> Kinematics::right_arm_orientation(
     const PoseData& pose,
+    const Eigen::Quaterniond& hip_quat,
     const Eigen::Quaterniond& torso_quat,
     double alpha
 ) {
+    Eigen::Quaterniond torso_g = hip_quat*torso_quat; // global torso orientation
     Eigen::Quaterniond r_arm_upper_quat(1, 0, 0, 0);
     Eigen::Quaterniond r_arm_lower_quat(1, 0, 0, 0);
     Eigen::Quaterniond r_arm_lower_quat_g(1, 0, 0, 0);
     Eigen::Quaterniond r_hand_quat(1, 0, 0, 0);
 
-    Eigen::Matrix3d torso_matrix = torso_quat.toRotationMatrix();
+    Eigen::Matrix3d torso_matrix = torso_g.toRotationMatrix();
     Eigen::Vector3d torso_z = torso_matrix.col(2);
 
     Eigen::Quaterniond upper_quat, lower_quat;
+
+    bool default_pose = false;
 
     // ========================
     // Upper arm (shoulder → elbow)
@@ -629,7 +601,7 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
 
         upper_quat = Eigen::Quaterniond(r1_rot_matrix);
         upper_quat.normalize();
-        r_arm_upper_quat = torso_quat.inverse() * upper_quat;
+        r_arm_upper_quat = torso_g.inverse() * upper_quat;
     }
 
     // ========================
@@ -675,7 +647,7 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
 
         // ---- SINGULARITY HANDLING (straight arm) ----
         if (has_prev_r1_quat_) {
-            Eigen::Quaterniond prev_upper_global = torso_quat * prev_r1_quat_;
+            Eigen::Quaterniond prev_upper_global = torso_g * prev_r1_quat_;
             Eigen::Vector3d prev_r1_x_axis = prev_upper_global.toRotationMatrix().col(0);
 
             double elbow_align = arm_vec.dot(forearm_vec);
@@ -697,7 +669,7 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
 
         upper_quat = Eigen::Quaterniond(r1_rot_matrix);
         upper_quat.normalize();
-        r_arm_upper_quat = torso_quat.inverse() * upper_quat;
+        r_arm_upper_quat = torso_g.inverse() * upper_quat;
 
         // ========================
         // Forearm / wrist orientation
@@ -707,19 +679,23 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
         Eigen::Vector3d r2_x_axis;
         if (right_hand_normal_vector) {
             r2_x_axis = normalize((*right_hand_normal_vector)); // Use positive normal vector
+            prev_r_handvec_ = r2_x_axis;
+            prev_r_hand_quat_recovery_ = right_hand_quat;
             right_hand_state_ = true;
-            //std::cout << "r2_x_axis: hand normal\n";
+           // std::cout << "r2_x_axis: hand normal\n";
         }
-        else if (r1_x_axis.norm() > 0.1) {
-            r2_x_axis = r1_x_axis;//prev_r_handvec;
+        else if (prev_r_handvec_.norm() > 0.1) {
+            r2_x_axis = prev_r_handvec_;
+            right_hand_quat = prev_r_hand_quat_recovery_;
             right_hand_state_ = false;
-            //std::cout << "r2_x_axis: prev fallback\n";
+            //std::cout << "backup from previous\n";
         }
         else {
             Eigen::Vector3d torso_x = torso_matrix.col(0);  // Use torso X axis like Python
             r2_x_axis = torso_x;
             right_hand_state_ = false;
-            //std::cout << "r2_x_axis: torso_x default\n";
+            default_pose = true;
+            //std::cout << "default\n";
         }
 
         Eigen::Vector3d r2_z_axis = normalize(r2_x_axis.cross(forearm_vec));
@@ -734,7 +710,7 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
         lower_quat = Eigen::Quaterniond(r2_rot_matrix);
         lower_quat.normalize();
         r_arm_lower_quat = upper_quat.inverse() * lower_quat;
-        r_arm_lower_quat_g = torso_quat.inverse() * lower_quat;
+        r_arm_lower_quat_g = torso_g.inverse() * lower_quat;
         
         // Calculate hand quaternion relative to lower arm
         r_hand_quat = lower_quat.inverse() * right_hand_quat;
@@ -783,6 +759,10 @@ std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Qu
         has_prev_r_hand_quat_ = true;
     }
     prev_r_hand_quat_ = r_hand_quat;
+
+    if (default_pose) {
+        r_hand_quat = Eigen::Quaterniond::Identity();
+    }
 
     return {r_arm_upper_quat, r_arm_lower_quat, r_arm_lower_quat_g, r_hand_quat};
 }
@@ -1286,12 +1266,12 @@ PoseResults Kinematics::process_kinematics(
     auto normalized_pose = normalize_z_data(pose_data);
 
     // Compute orientations
-    Eigen::Quaterniond torso_quat = torso_orientation(normalized_pose);
     Eigen::Quaterniond hip_quat   = hip_orientation(normalized_pose);
-    Eigen::Quaterniond head_quat  = head_orientation(normalized_pose, torso_quat);
+    Eigen::Quaterniond torso_quat = torso_orientation(normalized_pose, hip_quat);
+    Eigen::Quaterniond head_quat  = head_orientation(normalized_pose, hip_quat, torso_quat);
 
-    auto [l_upper_quat, l_lower_quat, l_lower_quat_g, l_hand_quat] = left_arm_orientation(normalized_pose, torso_quat);
-    auto [r_upper_quat, r_lower_quat, r_lower_quat_g, r_hand_quat] = right_arm_orientation(normalized_pose, torso_quat);
+    auto [l_upper_quat, l_lower_quat, l_lower_quat_g, l_hand_quat] = left_arm_orientation(normalized_pose,hip_quat, torso_quat);
+    auto [r_upper_quat, r_lower_quat, r_lower_quat_g, r_hand_quat] = right_arm_orientation(normalized_pose, hip_quat, torso_quat);
 
     // Compute leg orientations
     auto [l_leg_upper_quat, l_leg_lower_quat, l_foot_quat] = left_leg_orientation(normalized_pose, hip_quat);
@@ -1350,7 +1330,7 @@ PoseResults Kinematics::structure_kinematic_output(
     auto hip_q = to_mojo(hip_quat);
     auto hip_e = hip_q.to_euler(mojo_math::EULER_ALGORITHM::YXZ);
     results.quaternions.push_back(hip_q);
-    results.eulerAngles.push_back(Eigen::Vector3d(hip_e.x, hip_e.z, hip_e.y));
+    results.eulerAngles.push_back(Eigen::Vector3d(-hip_e.x, -hip_e.z, hip_e.y));
 
     // --- Head ---
     auto head_q = to_mojo(head_quat);
@@ -1395,13 +1375,13 @@ PoseResults Kinematics::structure_kinematic_output(
     // --- Hand Euler angles ---
     auto l_hand_e = l_hand_q.to_euler(mojo_math::EULER_ALGORITHM::XYZ);
     auto r_hand_e = r_hand_q.to_euler(mojo_math::EULER_ALGORITHM::XYZ);
-    results.eulerAngles.push_back(Eigen::Vector3d(-l_hand_e.z, l_hand_e.x, -l_hand_e.y));
+    results.eulerAngles.push_back(Eigen::Vector3d(-l_hand_e.z, -l_hand_e.x, -l_hand_e.y));
     results.eulerAngles.push_back(Eigen::Vector3d(r_hand_e.z, -r_hand_e.x, r_hand_e.y));
 
     // --- Left leg quaternions ---
-    auto l_leg_upper_q = to_mojo(l_leg_upper_quat);
-    auto l_leg_lower_q = to_mojo(l_leg_lower_quat);
-    auto l_foot_q = to_mojo(l_foot_quat);
+    auto l_leg_upper_q = to_mojo(r_leg_upper_quat);
+    auto l_leg_lower_q = to_mojo(r_leg_lower_quat);
+    auto l_foot_q = to_mojo(r_foot_quat);
     results.quaternions.push_back(l_leg_upper_q);
     results.quaternions.push_back(l_leg_lower_q);
     results.quaternions.push_back(l_foot_q);
@@ -1410,14 +1390,14 @@ PoseResults Kinematics::structure_kinematic_output(
     auto l_leg_upper_e = l_leg_upper_q.to_euler(mojo_math::EULER_ALGORITHM::XYZ);
     auto l_leg_lower_e = l_leg_lower_q.to_euler(mojo_math::EULER_ALGORITHM::XYZ);
     auto l_foot_e = l_foot_q.to_euler(mojo_math::EULER_ALGORITHM::XYZ);
-    results.eulerAngles.push_back(Eigen::Vector3d(-l_leg_upper_e.z, -l_leg_upper_e.x, -l_leg_upper_e.y));
-    results.eulerAngles.push_back(Eigen::Vector3d(-l_leg_lower_e.z, -l_leg_lower_e.x, -l_leg_lower_e.y));
-    results.eulerAngles.push_back(Eigen::Vector3d(-l_foot_e.z, -l_foot_e.x, -l_foot_e.y));
+    results.eulerAngles.push_back(Eigen::Vector3d(-l_leg_upper_e.x, l_leg_upper_e.z, -l_leg_upper_e.y));
+    results.eulerAngles.push_back(Eigen::Vector3d(-l_leg_lower_e.x, l_leg_lower_e.z, -l_leg_lower_e.y));
+    results.eulerAngles.push_back(Eigen::Vector3d(-l_foot_e.x, l_foot_e.z, -l_foot_e.y));
 
     // --- Right leg quaternions ---
-    auto r_leg_upper_q = to_mojo(r_leg_upper_quat);
-    auto r_leg_lower_q = to_mojo(r_leg_lower_quat);
-    auto r_foot_q = to_mojo(r_foot_quat);
+    auto r_leg_upper_q = to_mojo(l_leg_upper_quat);
+    auto r_leg_lower_q = to_mojo(l_leg_lower_quat);
+    auto r_foot_q = to_mojo(l_foot_quat);
     results.quaternions.push_back(r_leg_upper_q);
     results.quaternions.push_back(r_leg_lower_q);
     results.quaternions.push_back(r_foot_q);
@@ -1426,9 +1406,9 @@ PoseResults Kinematics::structure_kinematic_output(
     auto r_leg_upper_e = r_leg_upper_q.to_euler(mojo_math::EULER_ALGORITHM::XYZ);
     auto r_leg_lower_e = r_leg_lower_q.to_euler(mojo_math::EULER_ALGORITHM::XYZ);
     auto r_foot_e = r_foot_q.to_euler(mojo_math::EULER_ALGORITHM::XYZ);
-    results.eulerAngles.push_back(Eigen::Vector3d(r_leg_upper_e.z, -r_leg_upper_e.x, r_leg_upper_e.y));
-    results.eulerAngles.push_back(Eigen::Vector3d(r_leg_lower_e.z, -r_leg_lower_e.x, r_leg_lower_e.y));
-    results.eulerAngles.push_back(Eigen::Vector3d(r_foot_e.z, -r_foot_e.x, r_foot_e.y));
+    results.eulerAngles.push_back(Eigen::Vector3d(-r_leg_upper_e.x, -r_leg_upper_e.z, r_leg_upper_e.y));
+    results.eulerAngles.push_back(Eigen::Vector3d(-r_leg_lower_e.x, -r_leg_lower_e.z, r_leg_lower_e.y));
+    results.eulerAngles.push_back(Eigen::Vector3d(-r_foot_e.z, -r_foot_e.x, r_foot_e.y));
 
     results.eulerJson = avatar_json(results.eulerAngles);
     results.planeJson = json_isolated_angles(results.quaternions, results.eulerAngles);
@@ -1453,15 +1433,11 @@ Kinematics::avatar_json(
     json_angles["theta_torso_pitch_r"] = euler_angles[0].x();
     json_angles["theta_torso_tilt_r"]  = euler_angles[0].y();
     json_angles["theta_torso_yaw_r"]   = euler_angles[0].z();
-    json_angles["theta_torso_roll_r"]  = 0.0;
-    json_angles["theta_torso_bend_r"]  = 0.0;
 
     // --- Hip ---
-    json_angles["theta_hip_pitch_r"] = euler_angles[1].x();
-    json_angles["theta_hip_tilt_r"]  = euler_angles[1].y();
-    json_angles["theta_hip_yaw_r"]   = euler_angles[1].z();
-    json_angles["theta_hip_roll_r"]  = 0.0;
-    json_angles["theta_hip_bend_r"]  = 0.0;
+    json_angles["theta_pelvis_pitch"] = euler_angles[1].x();
+    json_angles["theta_pelvis_tilt"]  = euler_angles[1].y();
+    json_angles["theta_pelvis_yaw"]   = euler_angles[1].z();
 
     // --- Head ---
     json_angles["theta_head_pitch_h"] = euler_angles[2].x();
@@ -1477,7 +1453,6 @@ Kinematics::avatar_json(
     json_angles["theta_armright_lower_beta"]  = euler_angles[6].y();
     json_angles["theta_armright_lower_gamma"] = euler_angles[6].z();
 
-    
     // --- Left arm ---
     json_angles["theta_armleft_upper_alpha"] = euler_angles[3].x();
     json_angles["theta_armleft_upper_beta"]  = euler_angles[3].y();
@@ -1997,6 +1972,10 @@ Kinematics::json_isolated_angles(
 
     return json;
 }
+
+
+
+
 
 nlohmann::json Kinematics::structure_json_from_quats(
     const std::vector<std::string>& keys,

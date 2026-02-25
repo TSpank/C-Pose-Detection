@@ -124,6 +124,13 @@ private:
     bool right_leg_aligned_;
     bool left_leg_aligned_;
 
+    Eigen::Vector3d prev_r_handvec_;
+    Eigen::Vector3d prev_l_handvec_;
+
+    Eigen::Quaterniond prev_r_hand_quat_recovery_;
+    Eigen::Quaterniond prev_l_hand_quat_recovery_;
+
+
 public:
     // ===========================
     // Coordinate System:
@@ -153,6 +160,7 @@ public:
     // ========================
     Eigen::Quaterniond torso_orientation(
     const PoseData& pose,
+    const Eigen::Quaterniond& torso_quat,
     double alpha = 0.3
 );
 
@@ -169,6 +177,7 @@ public:
     // ========================
     Eigen::Quaterniond head_orientation(
     const PoseData& pose,
+    const Eigen::Quaterniond& hip_quat,
     const Eigen::Quaterniond& torso_quat,
     double alpha = 0.3
 );
@@ -178,6 +187,7 @@ public:
     // ========================
     std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> left_arm_orientation(
     const PoseData& pose,
+    const Eigen::Quaterniond& hip_quat,
     const Eigen::Quaterniond& torso_quat,
     double alpha = 0.3
 );
@@ -187,6 +197,7 @@ public:
     // ========================
     std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> right_arm_orientation(
     const PoseData& pose,
+    const Eigen::Quaterniond& hip_quat,
     const Eigen::Quaterniond& torso_quat,
     double alpha = 0.3
 );

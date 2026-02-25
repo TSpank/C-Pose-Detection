@@ -29,7 +29,7 @@ const std::string SUB_PASSWORD("dektzOWb3pmI");
 
 const std::string PUB_SERVER_ADDRESS("tcp://207.154.244.181:1883");
 const std::string PUB_CLIENT_ID("publisher_client");
-const std::string PUB_TOPIC("mojo/iOS/thomasavatar");
+const std::string PUB_TOPIC("mojo/iOS/thomas");
 const std::string PUB_USERNAME("scope_mosquitto");
 const std::string PUB_PASSWORD("dektzOWb3pmI");
 
@@ -147,48 +147,6 @@ void extract_pose_data_fast(
             ));
         }
     }
-}
-
-// ============================================================================
-// Adapter: Convert PoseData to std::map for backward compatibility
-// Use this during transition period, then refactor Kinematics to use PoseData
-// ============================================================================
-std::map<std::string, Eigen::Vector3d> poseDataToMap(const PoseData& pd) {
-    std::map<std::string, Eigen::Vector3d> result;
-    
-    // Body landmarks
-    if (pd.has(PoseLandmark::Nose)) result["Nose"] = pd[PoseLandmark::Nose];
-    if (pd.has(PoseLandmark::LeftEar)) result["LeftEar"] = pd[PoseLandmark::LeftEar];
-    if (pd.has(PoseLandmark::RightEar)) result["RightEar"] = pd[PoseLandmark::RightEar];
-    if (pd.has(PoseLandmark::LeftShoulder)) result["LeftShoulder"] = pd[PoseLandmark::LeftShoulder];
-    if (pd.has(PoseLandmark::RightShoulder)) result["RightShoulder"] = pd[PoseLandmark::RightShoulder];
-    if (pd.has(PoseLandmark::LeftElbow)) result["LeftElbow"] = pd[PoseLandmark::LeftElbow];
-    if (pd.has(PoseLandmark::RightElbow)) result["RightElbow"] = pd[PoseLandmark::RightElbow];
-    if (pd.has(PoseLandmark::LeftWrist)) result["LeftWrist"] = pd[PoseLandmark::LeftWrist];
-    if (pd.has(PoseLandmark::RightWrist)) result["RightWrist"] = pd[PoseLandmark::RightWrist];
-    if (pd.has(PoseLandmark::LeftHip)) result["LeftHip"] = pd[PoseLandmark::LeftHip];
-    if (pd.has(PoseLandmark::RightHip)) result["RightHip"] = pd[PoseLandmark::RightHip];
-    if (pd.has(PoseLandmark::LeftKnee)) result["LeftKnee"] = pd[PoseLandmark::LeftKnee];
-    if (pd.has(PoseLandmark::RightKnee)) result["RightKnee"] = pd[PoseLandmark::RightKnee];
-    if (pd.has(PoseLandmark::LeftAnkle)) result["LeftAnkle"] = pd[PoseLandmark::LeftAnkle];
-    if (pd.has(PoseLandmark::RightAnkle)) result["RightAnkle"] = pd[PoseLandmark::RightAnkle];
-    
-    // Face mesh
-    if (pd.has(PoseLandmark::MeshNoseTip)) result["mesh_NoseTip"] = pd[PoseLandmark::MeshNoseTip];
-    if (pd.has(PoseLandmark::MeshLeftEarTragus)) result["mesh_LeftEarTragus"] = pd[PoseLandmark::MeshLeftEarTragus];
-    if (pd.has(PoseLandmark::MeshRightEarTragus)) result["mesh_RightEarTragus"] = pd[PoseLandmark::MeshRightEarTragus];
-    
-    // Hand landmarks - Left (normalized)
-    if (pd.has(PoseLandmark::LeftPalmBase)) result["leftPalmBase"] = pd[PoseLandmark::LeftPalmBase];
-    if (pd.has(PoseLandmark::RightPalmBase)) result["rightPalmBase"] = pd[PoseLandmark::RightPalmBase];
-    if (pd.has(PoseLandmark::LeftIndexFingerBase)) result["leftIndexFingerBase"] = pd[PoseLandmark::LeftIndexFingerBase];
-    if (pd.has(PoseLandmark::LeftMiddleFingerBase)) result["leftMiddleFingerBase"] = pd[PoseLandmark::LeftMiddleFingerBase];
-    if (pd.has(PoseLandmark::LeftPinkyFingerBase)) result["leftPinkyFingerBase"] = pd[PoseLandmark::LeftPinkyFingerBase];
-    if (pd.has(PoseLandmark::RightIndexFingerBase)) result["rightIndexFingerBase"] = pd[PoseLandmark::RightIndexFingerBase];
-    if (pd.has(PoseLandmark::RightMiddleFingerBase)) result["rightMiddleFingerBase"] = pd[PoseLandmark::RightMiddleFingerBase];
-    if (pd.has(PoseLandmark::RightPinkyFingerBase)) result["rightPinkyFingerBase"] = pd[PoseLandmark::RightPinkyFingerBase];
-
-    return result;
 }
 
 int main() {
