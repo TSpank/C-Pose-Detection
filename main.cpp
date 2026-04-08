@@ -49,7 +49,10 @@ void extract_pose_data_fast(
     // Filters stored per-landmark index for O(1) access
     // Static arrays with default constructor (uses default filter params)
     static std::array<OneEuroFilter, POSE_LANDMARK_COUNT> filters;
-    static std::array<OneEuroFilter, POSE_LANDMARK_COUNT> pixel_filters;
+    static std::array<OneEuroFilter, POSE_LANDMARK_COUNT> hand_filters;
+    for (auto& f : hand_filters) {
+        f = OneEuroFilter::Hands();
+    }
     
     // Clear previous data
     pose_data.clear();
@@ -70,6 +73,7 @@ void extract_pose_data_fast(
             pose_data.frame_width = (*j)["videoData"]["width"].get<int32_t>();
             pose_data.frame_height = (*j)["videoData"]["height"].get<int32_t>();
         }
+
     }
     
     double ts = static_cast<double>(pose_data.timestamp_ms);
@@ -94,12 +98,13 @@ void extract_pose_data_fast(
                 size_t i = static_cast<size_t>(idx);
                 
                 // Normalized coordinates (filtered)
-                Eigen::Vector3d norm_pt(
+                Eigen::Vector3d pt(
                     coords["x"].get<double>()*pose_data.frame_width,
                     coords["y"].get<double>()*pose_data.frame_height,
                     coords["z"].get<double>()*pose_data.frame_width
                 );
-                pose_data.set(idx, norm_pt);
+                pose_data.set(idx, hand_filters[i](pt, ts));
+                //pose_data.set(idx, norm_pt);
             }
         }
     }
@@ -110,7 +115,8 @@ void extract_pose_data_fast(
                 !coords.contains("z") || !coords.contains("inFrameLikelihood"))
                 continue;
 
-            if (coords["inFrameLikelihood"].get<double>() < 0.75)
+            double confidence = coords["inFrameLikelihood"].get<double>();
+            if (confidence < 0.3)
                 continue;
 
             bool found = false;
@@ -125,7 +131,7 @@ void extract_pose_data_fast(
                 coords["z"].get<double>()
             );
             
-            pose_data.set(idx, filters[i](pt, ts));
+            pose_data.set(idx, filters[i](pt, ts), confidence);
         }
     }
 
@@ -229,11 +235,21 @@ int main() {
                 extract_pose_data_fast(json_msg, fast_pose_data);
                 
                 long long timestamp = fast_pose_data.timestamp_ms;
+                std::vector<std::string> joint_names = {
+                                        "torso_quat","hip_quat","head_quat",
+                                        "l_arm_upper","l_arm_lower",
+                                        "r_arm_upper","l_arm_lower",
+                                        "l_hand","r_hand",
+                                        "l_leg_upper","l_leg_lower","l_foot",
+                                        "r_leg_upper","r_leg_lower","r_foot"
+                                    };
 
+                
                 // Direct PoseData → Kinematics (no conversion overhead!)
                 auto kinematic_output = kinematics.process_kinematics(fast_pose_data);
                 auto angles_map_plane = kinematics.json_isolated_angles(kinematic_output.quaternions,kinematic_output.eulerAngles);
                 auto angles_map = kinematics.avatar_json(kinematic_output.eulerAngles);
+                auto global_quats = kinematics.structure_json_from_quats(joint_names, kinematic_output.global_quaternions);
 
      
                 // // Prepare JSON for angles (reuse pre-allocated objects)
@@ -244,7 +260,9 @@ int main() {
 
                 payload_angles.clear();
                 payload_angles["pose"] = json_angles;
+                payload_angles["pose_quaternions"] = global_quats;
                 payload_angles["timestamp"] = timestamp; 
+
                 // // Publish angles as MQTT message
                 auto pubmsg_angles = mqtt::make_message(PUB_TOPIC, payload_angles.dump());
                 pubmsg_angles->set_qos(0); // Changed to QoS 0 for better performance
@@ -263,24 +281,14 @@ int main() {
                 payload_angles_plane["pose_avatar"] = json_angles;
                 payload_angles_plane["timestamp"] = timestamp; 
                 // // Publish angles as MQTT message
-                auto pubmsg_angles_plane = mqtt::make_message(PUB_TOPIC, payload_angles_plane.dump());
+                auto pubmsg_angles_plane = mqtt::make_message(PUB_TOPIC_python, payload_angles_plane.dump());
                 pubmsg_angles_plane->set_qos(0); // Changed to QoS 0 for better performance
                 
                 pub_client_python.publish(pubmsg_angles_plane);
 
-                std::cout << "Published: " << PUB_TOPIC << std::endl; // Removed for performance
+                std::cout << "Published: " << PUB_TOPIC_python << std::endl; // Removed for performance
 
                 // publish quats???????????????????????????????????????????????????????????????????????????????????
-                std::vector<std::string> joint_names = {
-                                        "torso_quat",
-                                        "head_quat",
-                                        "r_arm_upper",
-                                        "r_arm_lower",
-                                        "r_arm_lower_global",
-                                        "l_arm_upper",
-                                        "l_arm_lower",
-                                        "l_arm_lower_global"
-                                    };
                 nlohmann::json msg = kinematics.structure_json_from_quats(joint_names, kinematic_output.quaternions);
 
                 // // Publish angles as MQTT message

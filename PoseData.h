@@ -62,6 +62,9 @@ struct PoseData {
     // Fixed-size array of landmarks - cache-friendly contiguous memory
     alignas(32) std::array<Eigen::Vector3d, POSE_LANDMARK_COUNT> landmarks;
     
+    // Fixed-size array of confidence values (0.0 to 1.0)
+    alignas(32) std::array<double, POSE_LANDMARK_COUNT> confidence;
+    
     // Bitset to track which landmarks are valid/present
     std::bitset<POSE_LANDMARK_COUNT> valid;
     
@@ -69,12 +72,14 @@ struct PoseData {
     int64_t timestamp_ms = 0;
     int32_t frame_width = 0;
     int32_t frame_height = 0;
+    bool camera = true;
     
     // Default constructor - zero-initialize
     PoseData() {
         for (auto& lm : landmarks) {
             lm.setZero();
         }
+        confidence.fill(1.0);  // Default confidence to 1.0
         valid.reset();
     }
     
@@ -95,12 +100,28 @@ struct PoseData {
     // Set landmark value and mark as valid
     inline void set(PoseLandmark idx, const Eigen::Vector3d& value) {
         landmarks[static_cast<size_t>(idx)] = value;
+        confidence[static_cast<size_t>(idx)] = 1.0;  // Default confidence
+        valid.set(static_cast<size_t>(idx));
+    }
+    
+    // Set landmark value with confidence and mark as valid
+    inline void set(PoseLandmark idx, const Eigen::Vector3d& value, double conf) {
+        landmarks[static_cast<size_t>(idx)] = value;
+        confidence[static_cast<size_t>(idx)] = conf;
         valid.set(static_cast<size_t>(idx));
     }
     
     // Set landmark value and mark as valid (move version)
     inline void set(PoseLandmark idx, Eigen::Vector3d&& value) {
         landmarks[static_cast<size_t>(idx)] = std::move(value);
+        confidence[static_cast<size_t>(idx)] = 1.0;  // Default confidence
+        valid.set(static_cast<size_t>(idx));
+    }
+    
+    // Set landmark value with confidence and mark as valid (move version)
+    inline void set(PoseLandmark idx, Eigen::Vector3d&& value, double conf) {
+        landmarks[static_cast<size_t>(idx)] = std::move(value);
+        confidence[static_cast<size_t>(idx)] = conf;
         valid.set(static_cast<size_t>(idx));
     }
     
@@ -118,6 +139,16 @@ struct PoseData {
             return &landmarks[static_cast<size_t>(idx)];
         }
         return nullptr;
+    }
+    
+    // Get confidence value for a landmark
+    inline double getConfidence(PoseLandmark idx) const {
+        return confidence[static_cast<size_t>(idx)];
+    }
+    
+    // Set confidence value for a landmark
+    inline void setConfidence(PoseLandmark idx, double conf) {
+        confidence[static_cast<size_t>(idx)] = conf;
     }
     
     // Clear all data

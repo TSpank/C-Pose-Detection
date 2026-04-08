@@ -5,9 +5,13 @@
 class OneEuroFilter {
 public:
     // Default constructor for array initialization
-    OneEuroFilter() : OneEuroFilter(30.0, 0.01, 0.001, 1.0) {}
+    OneEuroFilter() : OneEuroFilter(30.0, 0.008, 0.001, 0.7) {}
+   
+    static OneEuroFilter Hands() {
+        return OneEuroFilter(30.0, 0.03, 0.007, 0.7);
+    }
     
-    OneEuroFilter(double freq, double min_cutoff = 1.0, double beta = 0.0, double d_cutoff = 1.0);
+    OneEuroFilter(double freq, double min_cutoff = 0.008, double beta = 0.001, double d_cutoff = 0.7);
 
     Eigen::Vector3d operator()(const Eigen::Vector3d& x, double timestamp_ms);
 

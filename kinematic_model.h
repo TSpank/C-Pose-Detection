@@ -16,10 +16,26 @@
 // -------------------------------------------------------------
 struct PoseResults {
     std::vector<mojo_quaternion::quaternion> quaternions;
+    std::vector<mojo_quaternion::quaternion> global_quaternions;
     std::vector<Eigen::Vector3d> eulerAngles;
     nlohmann::json eulerJson;
     nlohmann::json planeJson;
 };
+
+// -------------------------------------------------------------
+// Struct for perimeter check results
+// -------------------------------------------------------------
+    struct PerimeterCheckResult {
+    bool skip_head = false;
+
+    bool skip_l_arm = false;
+    bool skip_r_arm = false;
+
+    bool skip_hips = false;
+    bool skip_l_leg = false;
+    bool skip_r_leg = false;
+};
+
 
 class Kinematics {
 private:
@@ -32,7 +48,7 @@ private:
     static constexpr double Z_SCALE_MESH_FACTOR = 0.7;
     static constexpr double ARM_ALIGNMENT_THRESHOLD = 0.8;
     static constexpr double LEG_ALIGNMENT_THRESHOLD = 0.7;
-    static constexpr double MAX_PALM_JUMP_PIXELS = 20.0;
+    static constexpr double MAX_PALM_JUMP_PIXELS = 40.0;
     static constexpr double TORSO_ANGLE_THRESHOLD_DEG = 30.0;
     static constexpr double HEAD_STRAIGHTNESS_THRESHOLD = 0.052;
     static constexpr double ARM_VERTICAL_THRESHOLD = 0.85;
@@ -57,6 +73,51 @@ private:
         double alpha
     );
 
+    Eigen::Quaterniond prev_torso_quat_g_;  // stores last torso quaternion
+    bool has_prev_torso_quat_g_;
+
+    Eigen::Quaterniond prev_hip_quat_g_;    // stores last hip quaternion
+    bool has_prev_hip_quat_g_;
+
+    Eigen::Quaterniond prev_head_quat_g_;  // stores last head quaternion
+    bool has_prev_head_quat_g_;
+    
+    Eigen::Quaterniond prev_l1_quat_g_;  // stores l1 quaternion
+    bool has_prev_l1_quat_g_;     
+
+    Eigen::Quaterniond prev_l2_quat_g_;  // stores l2 quaternion
+    bool has_prev_l2_quat_g_;   
+
+    Eigen::Quaterniond prev_r1_quat_g_;  // stores r1 quaternion
+    bool has_prev_r1_quat_g_;     
+
+    Eigen::Quaterniond prev_r2_quat_g_;  // stores r2 quaternion
+    bool has_prev_r2_quat_g_;   
+
+    Eigen::Quaterniond prev_l_hand_quat_g_;  // stores left hand quaternion
+    bool has_prev_l_hand_quat_g_;
+
+    Eigen::Quaterniond prev_r_hand_quat_g_;  // stores right hand quaternion
+    bool has_prev_r_hand_quat_g_;
+
+    Eigen::Quaterniond prev_l1_leg_quat_g_;  // stores l1 quaternion
+    bool has_prev_l1_leg_quat_g_;     
+
+    Eigen::Quaterniond prev_l2_leg_quat_g_;  // stores l2 quaternion
+    bool has_prev_l2_leg_quat_g_;   
+
+    Eigen::Quaterniond prev_r1_leg_quat_g_;  // stores r1 quaternion
+    bool has_prev_r1_leg_quat_g_;     
+
+    Eigen::Quaterniond prev_r2_leg_quat_g_;  // stores r2 quaternion
+    bool has_prev_r2_leg_quat_g_;   
+
+    Eigen::Quaterniond prev_l_foot_quat_g_;  // stores left foot quaternion
+    bool has_prev_l_foot_quat_g_;
+
+    Eigen::Quaterniond prev_r_foot_quat_g_;  // stores right foot quaternion
+    bool has_prev_r_foot_quat_g_;
+
     //Previous qauts for slerp
     Eigen::Quaterniond prev_torso_quat_;  // stores last torso quaternion
     bool has_prev_torso_quat_;
@@ -73,23 +134,41 @@ private:
     Eigen::Quaterniond prev_l2_quat_;  // stores l2 quaternion
     bool has_prev_l2_quat_;   
 
+    Eigen::Quaterniond prev_l2_quat_t;  // stores l2 quaternion
+    bool has_prev_l2_quat_t;   
+
     Eigen::Quaterniond prev_r1_quat_;  // stores r1 quaternion
     bool has_prev_r1_quat_;     
 
     Eigen::Quaterniond prev_r2_quat_;  // stores r2 quaternion
     bool has_prev_r2_quat_;   
 
-    Eigen::Quaterniond prev_l2_quat_g_;  // stores l2 quaternion g
-    bool has_prev_l2_quat_g_;   
-
-    Eigen::Quaterniond prev_r2_quat_g_;  // stores r2 quaternion g
-    bool has_prev_r2_quat_g_;   
+    Eigen::Quaterniond prev_r2_quat_t;  // stores r2 quaternion
+    bool has_prev_r2_quat_t;  
 
     Eigen::Quaterniond prev_l_hand_quat_;  // stores left hand quaternion
     bool has_prev_l_hand_quat_;
 
     Eigen::Quaterniond prev_r_hand_quat_;  // stores right hand quaternion
     bool has_prev_r_hand_quat_;
+
+    Eigen::Quaterniond prev_l1_leg_quat_;  // stores l1 quaternion
+    bool has_prev_l1_leg_quat_;     
+
+    Eigen::Quaterniond prev_l2_leg_quat_;  // stores l2 quaternion
+    bool has_prev_l2_leg_quat_;   
+
+    Eigen::Quaterniond prev_r1_leg_quat_;  // stores r1 quaternion
+    bool has_prev_r1_leg_quat_;     
+
+    Eigen::Quaterniond prev_r2_leg_quat_;  // stores r2 quaternion
+    bool has_prev_r2_leg_quat_;   
+
+    Eigen::Quaterniond prev_l_foot_quat_;  // stores left foot quaternion
+    bool has_prev_l_foot_quat_;
+
+    Eigen::Quaterniond prev_r_foot_quat_;  // stores right foot quaternion
+    bool has_prev_r_foot_quat_;
 
     double z_scale;
     double z_scale_mesh;
@@ -106,21 +185,6 @@ private:
     bool right_arm_aligned_;
     bool left_arm_aligned_;
 
-    // Leg tracking variables
-    Eigen::Quaterniond prev_r_leg_upper_quat_;
-    bool has_prev_r_leg_upper_quat_;
-    Eigen::Quaterniond prev_r_leg_lower_quat_;
-    bool has_prev_r_leg_lower_quat_;
-    Eigen::Quaterniond prev_r_foot_quat_;
-    bool has_prev_r_foot_quat_;
-    
-    Eigen::Quaterniond prev_l_leg_upper_quat_;
-    bool has_prev_l_leg_upper_quat_;
-    Eigen::Quaterniond prev_l_leg_lower_quat_;
-    bool has_prev_l_leg_lower_quat_;
-    Eigen::Quaterniond prev_l_foot_quat_;
-    bool has_prev_l_foot_quat_;
-    
     bool right_leg_aligned_;
     bool left_leg_aligned_;
 
@@ -129,6 +193,9 @@ private:
 
     Eigen::Quaterniond prev_r_hand_quat_recovery_;
     Eigen::Quaterniond prev_l_hand_quat_recovery_;
+
+    double left_hand_lost_count_;
+    double right_hand_lost_count_;
 
 
 public:
@@ -158,10 +225,11 @@ public:
     // ========================
     // Torso orientation
     // ========================
-    Eigen::Quaterniond torso_orientation(
+    std::pair<Eigen::Quaterniond, Eigen::Quaterniond> torso_orientation(
     const PoseData& pose,
     const Eigen::Quaterniond& torso_quat,
-    double alpha = 0.3
+    double alpha = 0.15,
+    bool skip = false
 );
 
     // ========================
@@ -169,55 +237,58 @@ public:
     // ========================
     Eigen::Quaterniond hip_orientation(
     const PoseData& pose,
-    double alpha = 0.3
+    double alpha = 0.15,
+    bool skip = false
 );
 
     // ========================
     // Head orientation
     // ========================
-    Eigen::Quaterniond head_orientation(
+    std::pair<Eigen::Quaterniond, Eigen::Quaterniond> head_orientation(
     const PoseData& pose,
-    const Eigen::Quaterniond& hip_quat,
     const Eigen::Quaterniond& torso_quat,
-    double alpha = 0.3
+    double alpha = 0.15,
+    bool skip = false
 );
 
     // ========================
     // Left Arm orientation
     // ========================
-    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> left_arm_orientation(
+    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> left_arm_orientation(
     const PoseData& pose,
-    const Eigen::Quaterniond& hip_quat,
     const Eigen::Quaterniond& torso_quat,
-    double alpha = 0.3
+    double alpha = 0.15,
+    bool skip = false
 );
 
     // ========================
     // Right Arm orientation
     // ========================
-    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> right_arm_orientation(
+    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> right_arm_orientation(
     const PoseData& pose,
-    const Eigen::Quaterniond& hip_quat,
     const Eigen::Quaterniond& torso_quat,
-    double alpha = 0.3
+    double alpha = 0.15,
+    bool skip = false
 );
 
     // ========================
     // Right Leg orientation  
     // ========================
-    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> right_leg_orientation(
+    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> right_leg_orientation(
     const PoseData& pose,
     const Eigen::Quaterniond& hip_quat,
-    double alpha = 0.3
+    double alpha = 0.15,
+    bool skip = false
 );
 
     // ========================
     // Left Leg orientation
     // ========================
-    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> left_leg_orientation(
+    std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Quaterniond> left_leg_orientation(
     const PoseData& pose,
     const Eigen::Quaterniond& hip_quat,
-    double alpha = 0.3
+    double alpha = 0.15,
+    bool skip = false
 );
 
     // ========================
@@ -238,23 +309,18 @@ public:
     // Strucuture kinematic output
     // ================================
     PoseResults structure_kinematic_output(
-        const Eigen::Quaterniond& torso_quat,
-        const Eigen::Quaterniond& hip_quat,
-        const Eigen::Quaterniond& head_quat,
-        const Eigen::Quaterniond& l_upper_quat,
-        const Eigen::Quaterniond& l_lower_quat,
-        const Eigen::Quaterniond& l_hand_quat,
-        const Eigen::Quaterniond& r_upper_quat,
-        const Eigen::Quaterniond& r_lower_quat,
-        const Eigen::Quaterniond& r_hand_quat,
-        const Eigen::Quaterniond& r_lower_quat_g,
-        const Eigen::Quaterniond& l_lower_quat_g,
-        const Eigen::Quaterniond& l_leg_upper_quat,
-        const Eigen::Quaterniond& l_leg_lower_quat,
-        const Eigen::Quaterniond& l_foot_quat,
-        const Eigen::Quaterniond& r_leg_upper_quat,
-        const Eigen::Quaterniond& r_leg_lower_quat,
-        const Eigen::Quaterniond& r_foot_quat);
+        const Eigen::Quaterniond& torso_quat,const Eigen::Quaterniond& hip_quat,const Eigen::Quaterniond& head_quat,
+        const Eigen::Quaterniond& l_upper_quat,const Eigen::Quaterniond& l_lower_quat,const Eigen::Quaterniond& l_hand_quat,
+        const Eigen::Quaterniond& r_upper_quat,const Eigen::Quaterniond& r_lower_quat,const Eigen::Quaterniond& r_hand_quat,
+        const Eigen::Quaterniond& r_lower_quat_t,const Eigen::Quaterniond& l_lower_quat_t,
+        const Eigen::Quaterniond& l_leg_upper_quat,const Eigen::Quaterniond& l_leg_lower_quat,const Eigen::Quaterniond& l_foot_quat,
+        const Eigen::Quaterniond& r_leg_upper_quat,const Eigen::Quaterniond& r_leg_lower_quat,const Eigen::Quaterniond& r_foot_quat,
+
+        const Eigen::Quaterniond& torso_quat_g, const Eigen::Quaterniond& head_quat_g,
+        const Eigen::Quaterniond& l_upper_quat_g, const Eigen::Quaterniond& l_lower_quat_g, const Eigen::Quaterniond& l_hand_quat_g,
+        const Eigen::Quaterniond& r_upper_quat_g, const Eigen::Quaterniond& r_lower_quat_g, const Eigen::Quaterniond& r_hand_quat_g,
+        const Eigen::Quaterniond& l_leg_upper_quat_g, const Eigen::Quaterniond& l_leg_lower_quat_g, const Eigen::Quaterniond& l_foot_quat_g,
+        const Eigen::Quaterniond& r_leg_upper_quat_g, const Eigen::Quaterniond& r_leg_lower_quat_g, const Eigen::Quaterniond& r_foot_quat_g);
 
     // ================================
     // JSON Conversion Helper
@@ -275,12 +341,58 @@ public:
     void update_z_scale(const PoseData& pose_data);
     PoseData normalize_z_data(const PoseData& pose_data);
 
-    // Not for app
+    // ================================
+    // Implement smoothing and local rotation computation for limbs
+    // ================================ 
+    std::pair<Eigen::Quaterniond, Eigen::Quaterniond> smooth_and_compute_local(
+        Eigen::Quaterniond& current_global,
+        const Eigen::Quaterniond& parent_global,
+        Eigen::Quaterniond& prev_global,
+        Eigen::Quaterniond& prev_local,
+        bool& has_prev,
+        double alpha,
+        bool skip = false
+    );
+
+    // ================================
+    // Check in perimter
+    // ================================ 
+    bool isPointInPerimeter(const PoseData& pose_data, PoseLandmark lm, double margin_ratio = 0.2);
+    inline bool areLandmarksInPerimeter(const PoseData& pose, Kinematics& kin,
+                                   PoseLandmark lm1, PoseLandmark lm2, double margin_ratio = 0.2);
+    PerimeterCheckResult checkBodyPerimeter(
+    const PoseData& pose
+);
+
+
+
+
+
+
+
+
+
+
+
+    // ================================ // ================================ // ================================ // ================================ // ================================ 
+    // ================================ // ================================ // ================================ // ================================ // ================================ 
+    // ================================ // ================================ // ================================ // ================================ // ================================ 
+    // ONly for testing
     // Header
     nlohmann::json structure_json_from_quats(
         const std::vector<std::string>& keys,
         const std::vector<mojo_quaternion::quaternion>& quats
     );
+
+
+
+
+
+
+
+
+
+
 
 };
 
