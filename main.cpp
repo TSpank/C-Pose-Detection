@@ -238,7 +238,7 @@ int main() {
                 std::vector<std::string> joint_names = {
                                         "torso_quat","hip_quat","head_quat",
                                         "l_arm_upper","l_arm_lower",
-                                        "r_arm_upper","l_arm_lower",
+                                        "r_arm_upper","r_arm_lower",
                                         "l_hand","r_hand",
                                         "l_leg_upper","l_leg_lower","l_foot",
                                         "r_leg_upper","r_leg_lower","r_foot"

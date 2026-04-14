@@ -1268,18 +1268,14 @@ PerimeterCheckResult Kinematics::checkBodyPerimeter(
     result.skip_l_leg = !isPointInPerimeter(pose,PoseLandmark::LeftKnee,leg_margin_ratio_) || result.skip_hips; // if hips are out of perimeter, also skip leg
     result.skip_r_leg = !isPointInPerimeter(pose,PoseLandmark::RightKnee,leg_margin_ratio_) || result.skip_hips; // if hips are out of perimeter, also skip leg
 
+    //temp
+    result.skip_head = false;
+    result.skip_l_arm = false;
+    result.skip_r_arm = false;
+    result.skip_hips = false;
+    result.skip_l_leg = false;
+    result.skip_r_leg = false;
 
-    // if (result.skip_head || result.skip_l_arm || result.skip_r_arm || result.skip_hips || result.skip_l_leg || result.skip_r_leg) {
-    //     std::cout << "Perimeter check - skip_head: " << result.skip_head
-         
-    //               << ", skip_hips: " << result.skip_hips
-
-    //               << ", skip_l_arm: " << result.skip_l_arm
-    //               << ", skip_r_arm: " << result.skip_r_arm
-    //               << ", skip_l_leg: " << result.skip_l_leg
-    //               << ", skip_r_leg: " << result.skip_r_leg << std::endl;
-    // }
-    
     return result;
 }
 
@@ -1316,6 +1312,8 @@ PoseResults Kinematics::process_kinematics(
     update_z_scale(pose_data);
     auto normalized_pose = normalize_z_data(pose_data);
 
+    
+
     // Compute orientations
     Eigen::Quaterniond hip_quat   = hip_orientation(normalized_pose, 0.15, skip.skip_hips);
     auto [torso_quat, torso_quat_g] = torso_orientation(normalized_pose, hip_quat);
@@ -1327,6 +1325,17 @@ PoseResults Kinematics::process_kinematics(
     // Compute leg orientations
     auto [l_leg_upper_quat_l, l_leg_upper_quat_g, l_leg_lower_quat_l, l_leg_lower_quat_g, l_foot_quat_l, l_foot_quat_g] = left_leg_orientation(normalized_pose, hip_quat, 0.15, skip.skip_l_leg);
     auto [r_leg_upper_quat_l, r_leg_upper_quat_g, r_leg_lower_quat_l, r_leg_lower_quat_g, r_foot_quat_l, r_foot_quat_g] = right_leg_orientation(normalized_pose, hip_quat, 0.15, skip.skip_r_leg);
+
+    //temp testing
+    // l_upper_quat_g = Eigen::Quaterniond::Identity();
+    // r_upper_quat_g = Eigen::Quaterniond::Identity();
+
+    // l_lower_quat_g = Eigen::Quaterniond::Identity();
+    // r_lower_quat_g = Eigen::Quaterniond::Identity();
+
+    // l_hand_quat_g = Eigen::Quaterniond::Identity();
+    // r_hand_quat_g = Eigen::Quaterniond::Identity();
+
 
     // Return as mojo quaternion vector
     auto kinematic_output = structure_kinematic_output(
